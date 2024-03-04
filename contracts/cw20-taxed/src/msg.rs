@@ -198,11 +198,8 @@ pub enum Cw20TaxedExecuteMsg {
     UploadLogo(Logo),
 
     /// Tax extension related
-    ToggleHalted {},
-    AddTaxpayers { taxpayers: Vec<String> },
-    RemoveTaxpayers { taxpayers: Vec<String> },
-    SetTax { tax: Decimal },
-    SetTaxAdmin { tax_admin: String },
+    SetTaxMap { tax_map: Option<TaxMap> },      // empty resets tax map to default
+    SetTaxAdmin { tax_admin: Option<String> },  // empty resets tax_admin to ""
 }
 
 #[cfg(test)]

@@ -88,6 +88,7 @@ pub struct TaxMap {
     pub on_transfer_from: TaxInfo,
     pub on_send: TaxInfo,
     pub on_send_from: TaxInfo,
+    pub admin: Addr,
 }
 
 impl Default for TaxMap {
@@ -97,6 +98,7 @@ impl Default for TaxMap {
             on_transfer_from: TaxInfo::default(),
             on_send: TaxInfo::default(),
             on_send_from: TaxInfo::default(),
+            admin: Addr::unchecked(""),
         }
     }
 }
@@ -449,12 +451,14 @@ mod tests {
             on_send: valid_tax_info.clone(),
             on_send_from: valid_tax_info.clone(),
             on_transfer_from: valid_tax_info.clone(),
+            admin: Addr::unchecked(""),
         };
         let invalid_tax_map = TaxMap {
             on_transfer: valid_tax_info.clone(),
             on_send: invalid_tax_info.clone(),
             on_send_from: valid_tax_info.clone(),
             on_transfer_from: valid_tax_info.clone(),
+            admin: Addr::unchecked(""),
         };
         assert_eq!(valid_tax_map.validate().is_ok(), true);
         assert_eq!(invalid_tax_map.validate().is_err(), true);

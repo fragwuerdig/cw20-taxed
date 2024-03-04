@@ -246,12 +246,32 @@ pub fn execute(
         }
 
         // Tax related extension
-        ExecuteMsg::ToggleHalted {} => unimplemented!(),
-        ExecuteMsg::AddTaxpayers { taxpayers } => unimplemented!(),
-        ExecuteMsg::RemoveTaxpayers { taxpayers } => unimplemented!(),
-        ExecuteMsg::SetTax { tax } => unimplemented!(),
+        ExecuteMsg::SetTaxMap { tax_map } => execute_set_tax_map(deps, env, info, tax_map),
         ExecuteMsg::SetTaxAdmin { tax_admin } => unimplemented!(),
     }
+}
+
+pub fn execute_set_tax_map(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    tax_map: Option<TaxMap>
+) -> Result<Response, ContractError> {
+    let curr_tax_map = TAX_INFO.load(deps.storage)?;
+    if curr_tax_map.admin != info.sender {
+        return Err(ContractError::Unauthorized {  })
+    }
+    let new_tax_map = match tax_map {
+        Some(x) => x,
+        None => TaxMap::default(),
+    };
+
+    new_tax_map.validate()?;
+    TAX_INFO.save(deps.storage, &new_tax_map)?;
+
+    Ok(Response::new()
+        .add_attribute("admin", new_tax_map.admin)
+    )
 }
 
 pub fn execute_transfer(
@@ -802,6 +822,7 @@ mod tests {
                 dst_cond: TaxCondition::Never(TaxNeverCondition{}),
                 proceeds: Addr::unchecked(""),
             },
+            admin: Addr::unchecked(""),
         });
 
         let instantiate_msg = InstantiateMsg {
@@ -1302,6 +1323,209 @@ mod tests {
         .unwrap();
         let loaded: BalanceResponse = from_json(&data).unwrap();
         assert_eq!(loaded.balance, Uint128::zero());
+    }
+
+    fn mock_valid_tax_map(admin: String) -> TaxMap {
+        TaxMap{
+            on_transfer: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            on_transfer_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            admin: Addr::unchecked(admin),
+        }
+    }
+
+    fn mock_invalid_tax_map(admin: String) -> TaxMap {
+        TaxMap{
+            on_transfer: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            on_transfer_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            admin: Addr::unchecked(admin),
+        }
+    }
+
+    #[test]
+    fn can_set_valid_tax_map() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+    }
+
+    #[test]
+    fn cannot_set_tax_map_if_not_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::SetTaxMap {
+            tax_map: Some(tax_map_in),
+        };
+        let res = execute(deps.as_mut(), env, info, msg);
+        assert_eq!(res.is_err(), true);
+    }
+
+    #[test]
+    fn can_set_valid_tax_map_if_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+        let info = mock_info("admin", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::SetTaxMap {
+            tax_map: Some(tax_map_in),
+        };
+        let res = execute(deps.as_mut(), env, info, msg);
+        assert_eq!(res.is_ok(), true);
+    }
+
+    #[test]
+    fn cannot_set_invalid_tax_map_if_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_valid = mock_valid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_valid),
+        };
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        let res = instantiate(deps.as_mut(), env.clone(), info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let tax_map_invalid = mock_invalid_tax_map("admin".to_string());
+        let info = mock_info("admin", &[]);
+        let msg = ExecuteMsg::SetTaxMap {
+            tax_map: Some(tax_map_invalid),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg);
+        assert_eq!(res.is_err(), true);
+    }
+
+    #[test]
+    fn cannot_instantiate_with_invalid_tax_map() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_invalid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg);
+        assert_eq!(res.is_err(), true);
     }
 
     #[test]
