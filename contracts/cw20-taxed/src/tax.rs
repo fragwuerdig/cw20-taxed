@@ -13,21 +13,21 @@ trait TaxDeductible {
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq)]
 pub enum TaxCondition {
-    None(TaxNoneCondition),
+    Never(TaxNeverCondition),
     ContractCode(TaxContractCodeCondition),
 }
 
 impl TaxCondition {
     pub fn is_taxed(&self, q: &QuerierWrapper, addr: Addr) -> bool {
         match self {
-            TaxCondition::None(c) => c.is_taxed(q, addr),
+            TaxCondition::Never(c) => c.is_taxed(q, addr),
             TaxCondition::ContractCode(c) => c.is_taxed(q, addr),
         }
     }
 
     pub fn tax_rate(&self, q: &QuerierWrapper, addr: Addr) -> Decimal {
         match self {
-            TaxCondition::None(c) => c.tax_rate(q, addr),
+            TaxCondition::Never(c) => c.tax_rate(q, addr),
             TaxCondition::ContractCode(c) => c.tax_rate(q, addr),
         }
     }
@@ -93,15 +93,15 @@ impl Default for TaxMap {
 impl Default for TaxInfo {
     fn default() -> Self {
         TaxInfo {
-            src_cond: TaxCondition::None(TaxNoneCondition{}),
-            dst_cond: TaxCondition::None(TaxNoneCondition{}),
+            src_cond: TaxCondition::Never(TaxNeverCondition{}),
+            dst_cond: TaxCondition::Never(TaxNeverCondition{}),
             proceeds: Addr::unchecked(""),
         }
     }
 }
 
 #[cw_serde]
-pub struct TaxNoneCondition {}
+pub struct TaxNeverCondition {}
 
 #[cw_serde]
 pub struct TaxContractCodeCondition {
@@ -125,7 +125,7 @@ impl TaxInfo {
     }
 }
 
-impl TaxDeductible for TaxNoneCondition {
+impl TaxDeductible for TaxNeverCondition {
     fn is_taxed(&self, _: &QuerierWrapper, addr: Addr) -> bool {
         false
     }
@@ -203,7 +203,7 @@ mod tests {
         let addr3 = Addr::unchecked("3");
 
         // tax condition not fulfilled for any address
-        let none_condition = TaxCondition::None(TaxNoneCondition {});
+        let none_condition = TaxCondition::Never(TaxNeverCondition {});
         assert_eq!(none_condition.is_taxed(&qw, addr0.clone()), false);
 
         // tax condition only fulfilled for listed contract addresses
@@ -236,7 +236,7 @@ mod tests {
         let addr3 = Addr::unchecked("3");
 
         // tax rate is zero for any address
-        let none_condition = TaxCondition::None(TaxNoneCondition {});
+        let none_condition = TaxCondition::Never(TaxNeverCondition {});
         assert_eq!(none_condition.tax_rate(&qw, addr0.clone()), Decimal::zero());
 
         // tax condition only fulfilled for listed contract addresses
@@ -269,8 +269,8 @@ mod tests {
         let addr3 = Addr::unchecked("3");
 
         let tax_info = TaxInfo {
-            src_cond: TaxCondition::None(TaxNoneCondition {}),
-            dst_cond: TaxCondition::None(TaxNoneCondition {}),
+            src_cond: TaxCondition::Never(TaxNeverCondition {}),
+            dst_cond: TaxCondition::Never(TaxNeverCondition {}),
             proceeds: addr0.clone(),
         };
         assert_eq!(tax_info.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::zero())));
