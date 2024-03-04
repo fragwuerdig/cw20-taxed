@@ -157,9 +157,8 @@ pub fn instantiate(
     };
     TOKEN_INFO.save(deps.storage, &data)?;
 
-    // TODO: store tax map here
     let tax_info = match msg.tax_map {
-        Some(x) => unimplemented!(),
+        Some(x) => x,
         None => TaxMap::default(),
     };
     TAX_INFO.save(deps.storage, &tax_info)?;
@@ -404,7 +403,7 @@ pub fn execute_send(
     let rcpt = deps.api.addr_validate(contract.clone().as_str())?;   
     let (net, tax) = map.on_send.deduct_tax(&deps.querier, rcpt, amount)?;
 
-    // move all tokens to the contract
+    // move net tokens to the contract
     BALANCES.update(
         deps.storage,
         &info.sender,
@@ -415,7 +414,14 @@ pub fn execute_send(
     BALANCES.update(
         deps.storage,
         &rcpt_addr,
-        |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + amount) },
+        |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + net) },
+    )?;
+
+    // move tax to this token
+    BALANCES.update(
+        deps.storage,
+        &env.contract.address,
+        |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + tax) },
     )?;
 
     // construct msg for net amount
@@ -688,10 +694,11 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
-    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, StdError, SubMsg, WasmMsg};
+    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, Never, StdError, SubMsg, WasmMsg};
 
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
+    use crate::tax::{TaxAlwaysCondition, TaxCondition, TaxInfo, TaxNeverCondition};
 
     fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
         query_balance(deps, address.into()).unwrap().balance
@@ -719,6 +726,10 @@ mod tests {
     // this will set up the instantiation for other tests
     fn do_instantiate(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
         _do_instantiate(deps, addr, amount, None)
+    }
+
+    fn do_instantiate_with_tax(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+        _do_instantiate_with_tax(deps, addr, amount)
     }
 
     // this will set up the instantiation for other tests
@@ -759,6 +770,71 @@ mod tests {
         );
         assert_eq!(get_balance(deps.as_ref(), addr), amount);
         assert_eq!(query_minter(deps.as_ref()).unwrap(), mint,);
+        meta
+    }
+
+    // this will set up the instantiation for other tests that
+    // involve taxation
+    fn _do_instantiate_with_tax(
+        mut deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
+
+        // simple flat p2p tax
+        let tax_map_in = Some(TaxMap{
+            on_transfer: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send: TaxInfo {
+                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            on_transfer_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+        });
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr.to_string(),
+                amount,
+            }],
+            mint: None,
+            marketing: None,
+            tax: None,
+            taxpayers: None,
+            tax_map: tax_map_in,
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        let meta = query_token_info(deps.as_ref()).unwrap();
+        assert_eq!(
+            meta,
+            TokenInfoResponse {
+                name: "Auto Gen".to_string(),
+                symbol: "AUTO".to_string(),
+                decimals: 3,
+                total_supply: amount,
+            }
+        );
+        assert_eq!(get_balance(deps.as_ref(), addr), amount);
         meta
     }
 
@@ -1305,6 +1381,61 @@ mod tests {
     }
 
     #[test]
+    fn transfer_with_tax() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let amount1 = Uint128::from(12340000u128);
+        let transfer = Uint128::from(76543u128);
+        let expected_remainder = amount1.checked_sub(transfer).unwrap();
+        let expected_tax = Uint128::from(7654u128);
+        let expected_net = Uint128::from(68889u128);
+        let expected_tfer_msg = ExecuteMsg::Transfer {
+            recipient: String::from("proceeds"),
+            amount: expected_tax.clone(),
+        };
+        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm( WasmMsg::Execute {
+            contract_addr: String::from("cosmos2contract"),
+            msg: to_json_binary(&expected_tfer_msg).unwrap(),
+            funds: vec![],
+        });
+
+        do_instantiate_with_tax(deps.as_mut(), &addr1, amount1);
+
+        // test valid transfer
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: addr2.clone(),
+            amount: transfer,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.messages.len(), 1); //expecting proceeds message
+        assert_eq!(res.messages[0].clone().msg, expected_proceeds_msg);
+        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), expected_net);
+        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), expected_tax);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
+
+        // test proceedings of tax were successful
+        let proceeds_info = mock_info("cosmos2contract", &[]);
+        let tax_res = execute(deps.as_mut(), env.clone(), proceeds_info, expected_tfer_msg).unwrap();
+        assert_eq!(tax_res.messages.len(), 0); //expecting no furhter messages
+        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), expected_net);
+        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), Uint128::zero());
+        assert_eq!(get_balance(deps.as_ref(), "proceeds"), expected_tax);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
+
+    }
+
+    #[test]
     fn burn() {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
         let addr1 = String::from("addr0001");
@@ -1423,6 +1554,84 @@ mod tests {
             query_token_info(deps.as_ref()).unwrap().total_supply,
             amount1
         );
+    }
+
+    #[test]
+    fn send_with_tax() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let contract = String::from("addr0002");
+        let amount1 = Uint128::from(12340000u128);
+        let transfer = Uint128::from(76543u128);
+        let expected_remainder = amount1.checked_sub(transfer).unwrap();
+        let expected_tax = Uint128::from(7654u128);
+        let expected_net = Uint128::from(68889u128);
+        let expected_tfer_msg = ExecuteMsg::Transfer {
+            recipient: String::from("proceeds"),
+            amount: expected_tax.clone(),
+        };
+        let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
+        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm( WasmMsg::Execute {
+            contract_addr: String::from("cosmos2contract"),
+            msg: to_json_binary(&expected_tfer_msg).unwrap(),
+            funds: vec![],
+        });
+
+        do_instantiate_with_tax(deps.as_mut(), &addr1, amount1);
+
+        // valid transfer
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
+            contract: contract.clone(),
+            amount: transfer,
+            msg: send_msg.clone(),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 2);
+
+        // ensure proper send message sent
+        // this is the message we want delivered to the other side
+        let binary_msg = Cw20ReceiveMsg {
+            sender: addr1.clone(),
+            amount: expected_net,
+            msg: send_msg,
+        }
+        .into_binary()
+        .unwrap();
+        // and this is how it must be wrapped for the vm to process it
+        assert_eq!(
+            res.messages[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract.clone(),
+                msg: binary_msg,
+                funds: vec![],
+            }))
+        );
+
+        // ensure balance and tax is properly transferred
+        assert_eq!(res.messages[1].clone().msg, expected_proceeds_msg);
+        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(get_balance(deps.as_ref(), contract.clone()), expected_net);
+        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), expected_tax);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
+
+        // test proceedings of tax were successful
+        let proceeds_info = mock_info("cosmos2contract", &[]);
+        let tax_res = execute(deps.as_mut(), env.clone(), proceeds_info, expected_tfer_msg).unwrap();
+        assert_eq!(tax_res.messages.len(), 0); //expecting no furhter messages
+        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(get_balance(deps.as_ref(), contract.clone()), expected_net);
+        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), Uint128::zero());
+        assert_eq!(get_balance(deps.as_ref(), "proceeds"), expected_tax);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
+
     }
 
     mod migration {
