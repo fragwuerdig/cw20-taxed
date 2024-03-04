@@ -14,6 +14,7 @@ trait TaxDeductible {
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq)]
 pub enum TaxCondition {
     Never(TaxNeverCondition),
+    Always(TaxAlwaysCondition),
     ContractCode(TaxContractCodeCondition),
 }
 
@@ -21,6 +22,7 @@ impl TaxCondition {
     pub fn is_taxed(&self, q: &QuerierWrapper, addr: Addr) -> bool {
         match self {
             TaxCondition::Never(c) => c.is_taxed(q, addr),
+            TaxCondition::Always(c) => c.is_taxed(q, addr),
             TaxCondition::ContractCode(c) => c.is_taxed(q, addr),
         }
     }
@@ -28,6 +30,7 @@ impl TaxCondition {
     pub fn tax_rate(&self, q: &QuerierWrapper, addr: Addr) -> Decimal {
         match self {
             TaxCondition::Never(c) => c.tax_rate(q, addr),
+            TaxCondition::Always(c) => c.tax_rate(q, addr),
             TaxCondition::ContractCode(c) => c.tax_rate(q, addr),
         }
     }
@@ -104,9 +107,14 @@ impl Default for TaxInfo {
 pub struct TaxNeverCondition {}
 
 #[cw_serde]
+pub struct TaxAlwaysCondition {
+    pub tax_rate: Decimal,
+}
+
+#[cw_serde]
 pub struct TaxContractCodeCondition {
-    code_ids: Vec<u64>,
-    tax_rate: Decimal,
+    pub code_ids: Vec<u64>,
+    pub tax_rate: Decimal,
 }
 
 impl TaxInfo {
@@ -132,6 +140,16 @@ impl TaxDeductible for TaxNeverCondition {
 
     fn tax_rate(&self, _: &QuerierWrapper,  addr: Addr) -> Decimal {
         Decimal::zero()
+    }
+}
+
+impl TaxDeductible for TaxAlwaysCondition {
+    fn is_taxed(&self, _: &QuerierWrapper, addr: Addr) -> bool {
+        true
+    }
+
+    fn tax_rate(&self, _: &QuerierWrapper,  addr: Addr) -> Decimal {
+        self.tax_rate
     }
 }
 
@@ -221,6 +239,16 @@ mod tests {
         // is not a contract
         assert_eq!(contract_code_condition.is_taxed(&qw, addr3.clone()), false);
 
+        // tax condition fulfilled for all addresses
+        let contract_code_condition = TaxCondition::Always(TaxAlwaysCondition {
+            tax_rate: Decimal::percent(10),
+        });
+
+        assert_eq!(contract_code_condition.is_taxed(&qw, addr0.clone()), true);
+        assert_eq!(contract_code_condition.is_taxed(&qw, addr1.clone()), true);
+        assert_eq!(contract_code_condition.is_taxed(&qw, addr2.clone()), true);
+        assert_eq!(contract_code_condition.is_taxed(&qw, addr3.clone()), true);
+
     }
 
     #[test]
@@ -254,6 +282,16 @@ mod tests {
         // is not a contract
         assert_eq!(contract_code_condition.tax_rate(&qw, addr3.clone()), Decimal::zero());
 
+        // tax condition fulfilled for all addresses
+        let contract_code_condition = TaxCondition::Always(TaxAlwaysCondition {
+            tax_rate: Decimal::percent(10),
+        });
+        assert_eq!(contract_code_condition.tax_rate(&qw, addr0.clone()), Decimal::percent(10));
+        assert_eq!(contract_code_condition.tax_rate(&qw, addr1.clone()), Decimal::percent(10));
+        assert_eq!(contract_code_condition.tax_rate(&qw, addr2.clone()), Decimal::percent(10));
+        assert_eq!(contract_code_condition.tax_rate(&qw, addr3.clone()), Decimal::percent(10));
+
+
     }
 
     #[test]
@@ -268,6 +306,7 @@ mod tests {
         let addr2 = Addr::unchecked("2");
         let addr3 = Addr::unchecked("3");
 
+        // == Test Tax Deduction for Tax Condition "Never"
         let tax_info = TaxInfo {
             src_cond: TaxCondition::Never(TaxNeverCondition {}),
             dst_cond: TaxCondition::Never(TaxNeverCondition {}),
@@ -275,6 +314,7 @@ mod tests {
         };
         assert_eq!(tax_info.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::zero())));
 
+        // == Test Tax Deduction for Tax Condition "Contract Code"
         let tax_info_with_tax = TaxInfo {
             src_cond: TaxCondition::ContractCode(TaxContractCodeCondition {
                 code_ids: vec![0, 1],
@@ -295,6 +335,24 @@ mod tests {
         assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr2.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
         // is not a contract -> no tax
         assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+
+        // == Test Tax Deduction for tax condition "always" ==
+        let tax_info_with_tax = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                tax_rate: Decimal::percent(10),
+            }),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                tax_rate: Decimal::percent(10),
+            }),
+            proceeds: addr0.clone(),
+        };
+
+        // is proceeds wallet -> no tax
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+        // is normal wallet -> tax
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr1.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr2.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
 
     }
 }
