@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    to_json_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, StdError, StdResult, Uint128, WasmMsg
+    to_json_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, StdError, StdResult, Uint128, WasmMsg
 };
 
 use cw2::{ensure_from_older_version, set_contract_version};
@@ -247,7 +247,7 @@ pub fn execute(
 
         // Tax related extension
         ExecuteMsg::SetTaxMap { tax_map } => execute_set_tax_map(deps, env, info, tax_map),
-        ExecuteMsg::SetTaxAdmin { tax_admin } => unimplemented!(),
+        ExecuteMsg::SetTaxAdmin { tax_admin } => execute_set_tax_admin(deps, env, info, tax_admin),
     }
 }
 
@@ -263,7 +263,12 @@ pub fn execute_set_tax_map(
     }
     let new_tax_map = match tax_map {
         Some(x) => x,
-        None => TaxMap::default(),
+        None => {
+            // reset default but preserve admin
+            let mut def = TaxMap::default();
+            def.admin = curr_tax_map.admin;
+            def
+        },
     };
 
     new_tax_map.validate()?;
@@ -271,6 +276,27 @@ pub fn execute_set_tax_map(
 
     Ok(Response::new()
         .add_attribute("admin", new_tax_map.admin)
+    )
+}
+
+pub fn execute_set_tax_admin(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    tax_admin: Option<String>
+) -> Result<Response, ContractError> {
+    let mut tax_map = TAX_INFO.load(deps.storage)?;
+    if tax_map.admin != info.sender {
+        return Err(ContractError::Unauthorized {  })
+    }
+    tax_map.admin = match tax_admin {
+        Some(x) => deps.api.addr_validate(&x)?,
+        None => Addr::unchecked(""),
+    };
+    TAX_INFO.save(deps.storage, &tax_map)?;
+
+    Ok(Response::new()
+        .add_attribute("admin", tax_map.admin)
     )
 }
 
@@ -640,6 +666,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         }
         QueryMsg::MarketingInfo {} => to_json_binary(&query_marketing_info(deps)?),
         QueryMsg::DownloadLogo {} => to_json_binary(&query_download_logo(deps)?),
+        QueryMsg::TaxMap {} => to_json_binary(&TAX_INFO.load(deps.storage)?),
     }
 }
 
@@ -1526,6 +1553,145 @@ mod tests {
         let env = mock_env();
         let res = instantiate(deps.as_mut(), env, info, instantiate_msg);
         assert_eq!(res.is_err(), true);
+    }
+
+    #[test]
+    fn ensure_setting_empty_tax_map_preserves_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+        let mut expected_tax_map = TaxMap::default();
+        expected_tax_map.admin = Addr::unchecked("admin");
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env.clone(), info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let info = mock_info("admin", &[]);
+        let msg = ExecuteMsg::SetTaxMap {
+            tax_map: None,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg);
+        assert_eq!(res.is_ok(), true);
+        assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), expected_tax_map);
+
+    }
+
+    #[test]
+    fn tax_admin_can_update_tax_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+        let mut expected_tax_map = tax_map_in.clone();
+        expected_tax_map.admin = Addr::unchecked("new_admin");
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env.clone(), info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let info = mock_info("admin", &[]);
+        let msg = ExecuteMsg::SetTaxAdmin {
+            tax_admin: Some(String::from("new_admin")),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg);
+        assert_eq!(res.is_ok(), true);
+        assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), expected_tax_map);
+    }
+
+    #[test]
+    fn others_cannot_update_tax_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in.clone()),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env.clone(), info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let info = mock_info("not_admin", &[]);
+        let msg = ExecuteMsg::SetTaxAdmin {
+            tax_admin: Some(String::from("new_admin")),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg);
+        assert_eq!(res.is_err(), true);
+        assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), tax_map_in);
+    }
+
+    #[test]
+    fn ensure_sound_setting_of_empty_tax_admin() {
+        let mut deps = mock_dependencies();
+        let addr1 = String::from("addr0001");
+        let amount1 = Uint128::from(12340000u128);
+        let tax_map_in = mock_valid_tax_map("admin".to_string());
+        let mut expected_tax_map = tax_map_in.clone();
+        expected_tax_map.admin = Addr::unchecked("");
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr1.to_string(),
+                amount: amount1,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: Some(tax_map_in),
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env.clone(), info, instantiate_msg);
+        assert_eq!(res.is_ok(), true);
+
+        let info = mock_info("admin", &[]);
+        let msg = ExecuteMsg::SetTaxAdmin {
+            tax_admin: None,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg);
+        assert_eq!(res.is_ok(), true);
+        assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), expected_tax_map);
     }
 
     #[test]

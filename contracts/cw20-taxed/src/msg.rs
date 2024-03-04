@@ -125,6 +125,8 @@ pub enum QueryMsg {
     /// contract.
     #[returns(cw20::DownloadLogoResponse)]
     DownloadLogo {},
+    #[returns(TaxMap)]
+    TaxMap {},
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
