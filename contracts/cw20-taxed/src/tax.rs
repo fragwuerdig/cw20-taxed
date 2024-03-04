@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{ Addr, Decimal, Empty, Querier, QuerierWrapper, StdError, Uint128, WasmQuery};
+use cosmwasm_std::{ Addr, Decimal, Empty, Querier, QuerierWrapper, StdError, StdResult, Uint128, WasmQuery};
 use crate::error::ContractError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,14 @@ impl TaxCondition {
             Err(_) => Uint128::zero(),
         }
     }
+
+    pub fn validate(&self) -> bool {
+        match self {
+            TaxCondition::Never(x) => x.validate(),
+            TaxCondition::Always(x) => x.validate(),
+            TaxCondition::ContractCode(x) => x.validate(),
+        }
+    }
     
 }
 
@@ -93,6 +101,18 @@ impl Default for TaxMap {
     }
 }
 
+impl TaxMap {
+    pub fn validate(&self) -> StdResult<()> {
+        match self.on_transfer.validate() &&
+            self.on_transfer_from.validate() &&
+            self.on_send.validate() &&
+            self.on_send_from.validate() {
+            true => {Ok(())},
+            false => {Err(StdError::generic_err(String::from("invalid tax map")))},
+        }
+    }
+}
+
 impl Default for TaxInfo {
     fn default() -> Self {
         TaxInfo {
@@ -103,12 +123,30 @@ impl Default for TaxInfo {
     }
 }
 
+impl TaxInfo {
+    pub fn validate(&self) -> bool {
+        self.src_cond.validate() && self.dst_cond.validate()
+    }
+}
+
 #[cw_serde]
 pub struct TaxNeverCondition {}
+
+impl TaxNeverCondition {
+    pub fn validate(&self) -> bool {
+        true
+    }
+}
 
 #[cw_serde]
 pub struct TaxAlwaysCondition {
     pub tax_rate: Decimal,
+}
+
+impl TaxAlwaysCondition {
+    pub fn validate(&self) -> bool {
+        self.tax_rate.ge(&Decimal::zero()) && self.tax_rate.le(&Decimal::one())
+    }
 }
 
 #[cw_serde]
@@ -117,19 +155,22 @@ pub struct TaxContractCodeCondition {
     pub tax_rate: Decimal,
 }
 
+impl TaxContractCodeCondition {
+    pub fn validate(&self) -> bool {
+        self.tax_rate.ge(&Decimal::zero()) && self.tax_rate.le(&Decimal::one())
+    }
+}
+
 impl TaxInfo {
     pub fn deduct_tax(&self, q: &QuerierWrapper, addr: Addr, amount: Uint128) -> Result<(Uint128, Uint128), ContractError> {
-        
         let is_taxed = self.src_cond.is_taxed(q, addr.clone())
             && self.dst_cond.is_taxed(q, addr.clone())
             && self.proceeds != addr;
-        
         match is_taxed {
             true => self.src_cond.tax_deduction(q, addr, amount),
             false => Ok((amount, Uint128::zero())),
             
         }
-    
     }
 }
 
@@ -355,4 +396,68 @@ mod tests {
         assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
 
     }
+
+    #[test]
+    fn test_tax_condition_validate() {
+        assert_eq!(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}.validate(), false);
+        assert_eq!(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}.validate(), true);
+        assert_eq!(TaxNeverCondition{}.validate(), true);
+    }
+
+    #[test]
+    fn test_tax_info_validate() {
+        let invalid_tax_info1 = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        let invalid_tax_info2 = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        let invalid_tax_info3 = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(11)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        let valid_tax_info = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(11)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        assert_eq!(invalid_tax_info1.validate(), false);
+        assert_eq!(invalid_tax_info2.validate(), false);
+        assert_eq!(invalid_tax_info3.validate(), false);
+        assert_eq!(valid_tax_info.validate(), true);
+    }
+
+    #[test]
+    fn test_tax_map_validate() {
+        let invalid_tax_info = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        let valid_tax_info = TaxInfo {
+            src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(11)}),
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+            proceeds: Addr::unchecked("blubb"),
+        };
+        let valid_tax_map = TaxMap {
+            on_transfer: valid_tax_info.clone(),
+            on_send: valid_tax_info.clone(),
+            on_send_from: valid_tax_info.clone(),
+            on_transfer_from: valid_tax_info.clone(),
+        };
+        let invalid_tax_map = TaxMap {
+            on_transfer: valid_tax_info.clone(),
+            on_send: invalid_tax_info.clone(),
+            on_send_from: valid_tax_info.clone(),
+            on_transfer_from: valid_tax_info.clone(),
+        };
+        assert_eq!(valid_tax_map.validate().is_ok(), true);
+        assert_eq!(invalid_tax_map.validate().is_err(), true);
+    }
+
 }

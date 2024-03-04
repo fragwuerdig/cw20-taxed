@@ -161,6 +161,7 @@ pub fn instantiate(
         Some(x) => x,
         None => TaxMap::default(),
     };
+    tax_info.validate()?;
     TAX_INFO.save(deps.storage, &tax_info)?;
 
     Ok(Response::default())
@@ -749,8 +750,6 @@ mod tests {
             }],
             mint: mint.clone(),
             marketing: None,
-            tax: None,
-            taxpayers: None,
             tax_map: None,
         };
         let info = mock_info("creator", &[]);
@@ -815,8 +814,6 @@ mod tests {
             }],
             mint: None,
             marketing: None,
-            tax: None,
-            taxpayers: None,
             tax_map: tax_map_in,
         };
         let info = mock_info("creator", &[]);
@@ -857,8 +854,6 @@ mod tests {
                 }],
                 mint: None,
                 marketing: None,
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
             let info = mock_info("creator", &[]);
@@ -900,8 +895,6 @@ mod tests {
                     cap: Some(limit),
                 }),
                 marketing: None,
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
             let info = mock_info("creator", &[]);
@@ -950,8 +943,6 @@ mod tests {
                     cap: Some(limit),
                 }),
                 marketing: None,
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
             let info = mock_info("creator", &[]);
@@ -981,8 +972,6 @@ mod tests {
                         marketing: Some("marketing".to_owned()),
                         logo: Some(Logo::Url("url".to_owned())),
                     }),
-                    tax: None,
-                    taxpayers: None,
                     tax_map: None,
                 };
 
@@ -1023,8 +1012,6 @@ mod tests {
                         marketing: Some("m".to_owned()),
                         logo: Some(Logo::Url("url".to_owned())),
                     }),
-                    tax: None,
-                    taxpayers: None,
                     tax_map: None,
                 };
 
@@ -1240,8 +1227,6 @@ mod tests {
             ],
             mint: None,
             marketing: None,
-            tax: None,
-            taxpayers: None,
             tax_map: None, 
         };
         let err =
@@ -1265,8 +1250,6 @@ mod tests {
             ],
             mint: None,
             marketing: None,
-            tax: None,
-            taxpayers: None,
             tax_map: None,
         };
         let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
@@ -1670,8 +1653,6 @@ mod tests {
                         }],
                         mint: None,
                         marketing: None,
-                        tax: None,
-                        taxpayers: None,
                         tax_map: None,
                     },
                     &[],
@@ -1774,8 +1755,6 @@ mod tests {
                     marketing: Some("marketing".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -1830,8 +1809,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -1885,8 +1862,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -1940,8 +1915,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -1995,8 +1968,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2050,8 +2021,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2105,8 +2074,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2163,8 +2130,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2218,8 +2183,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2269,8 +2232,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2322,8 +2283,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2376,8 +2335,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2428,8 +2385,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers:  None,
                 tax_map: None,
             };
 
@@ -2487,8 +2442,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 
@@ -2539,8 +2492,6 @@ mod tests {
                     marketing: Some("creator".to_owned()),
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
-                tax: None,
-                taxpayers: None,
                 tax_map: None,
             };
 

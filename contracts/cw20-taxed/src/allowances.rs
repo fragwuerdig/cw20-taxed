@@ -287,8 +287,6 @@ mod tests {
             }],
             mint: None,
             marketing: None,
-            tax: None,
-            taxpayers: None,
             tax_map: None, 
         };
         let info = mock_info("creator", &[]);

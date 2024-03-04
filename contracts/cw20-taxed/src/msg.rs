@@ -23,9 +23,11 @@ pub struct InstantiateMsg {
     pub initial_balances: Vec<Cw20Coin>,
     pub mint: Option<MinterResponse>,
     pub marketing: Option<InstantiateMarketingInfo>,
-    pub tax: Option<Decimal>,
-    pub taxpayers: Option<Vec<String>>,
     pub tax_map: Option<TaxMap>,
+}
+
+pub struct InstantiateTaxMap {
+
 }
 
 impl InstantiateMsg {
