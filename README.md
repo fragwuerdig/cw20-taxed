@@ -19,6 +19,8 @@ In order to get a feeling for the tax configuration please refer to these config
 
 ### Buy/Sell Tax on Terraport
 
+This configuration will trigger taxes on sell/buy on a Terraport pair as well as on liquidity withdraws from the pool.
+
 ```
 {
     "name": "Token",
@@ -91,6 +93,66 @@ In order to get a feeling for the tax configuration please refer to these config
 }
 ```
 
-### Disclaimer
+### Plain P2P Tax
+
+This is a token that charges taxes on plain p2p transfers. Sending to contracts with `Cw20ReceiveMsg` (triggering some action within the contract) is tax free. However, when the contract transfers tokens back to a plain wallet, taxes will be charged.
+
+```
+{
+
+    ...    // see above
+
+    "tax_map": {
+        "on_transfer": {
+            "src_cond": {
+                "Always": {
+                    "tax_rate": "0.01"    // tax rate plain p2p sending = 1%
+                }
+            },
+            "dst_cond": {
+                "Always": {
+                    "tax_rate": "0.0"    // this tax rate does not matter
+                }
+            },
+            "proceeds": "<proceeds-wallet>"    // the proceeds wallet receives all taxes
+        },
+        "on_send": {
+            "src_cond": {
+                "Never": {}
+            },
+            "dst_cond": {
+                "Never": {}
+            },
+            "proceeds": ""
+        },
+        "on_transfer_from": {
+            "src_cond": {
+                "Always": {
+                    "tax_rate": "0.01"    // tax rate plain p2p sending = 1%
+                }
+            },
+            "dst_cond": {
+                "Always": {
+                    "tax_rate": "0.0"    // this tax rate does not matter
+                }
+            },
+            "proceeds": "<proceeds-wallet>"    // the proceeds wallet receives all taxes
+        },
+        "on_send_from": {
+            "src_cond": {
+                "Never": {}
+            },
+            "dst_cond": {
+                "Never": {}
+            },
+            "proceeds": ""
+        },
+        // this wallet can change tax policy
+        "admin": "<tax-admin-wallet>"
+    }
+}
+```
+
+## Disclaimer
 
 The code of this project **IS NOT AUDITED**. So please, proceed very carfully when using this software.
