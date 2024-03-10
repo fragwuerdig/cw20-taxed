@@ -309,8 +309,8 @@ pub fn execute_transfer(
 ) -> Result<Response, ContractError> {
     let rcpt_addr = deps.api.addr_validate(&recipient)?;
     let map = TAX_INFO.load(deps.storage)?;
-    let rcpt_proceeds = map.on_send.proceeds.clone().into_string(); 
-    let (net, tax) = map.on_send.deduct_tax(&deps.querier, rcpt_addr.clone(), amount)?;
+    let rcpt_proceeds = map.on_transfer.proceeds.clone().into_string(); 
+    let (net, tax) = map.on_transfer.deduct_tax(&deps.querier, rcpt_addr.clone(), amount)?;
     
     // remove tokens from sender balance
     BALANCES.update(
@@ -776,8 +776,12 @@ mod tests {
         _do_instantiate(deps, addr, amount, None)
     }
 
-    fn do_instantiate_with_tax(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
-        _do_instantiate_with_tax(deps, addr, amount)
+    fn do_instantiate_with_tax_on_transfer(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+        _do_instantiate_with_tax_on_transfer(deps, addr, amount)
+    }
+
+    fn do_instantiate_with_tax_on_send(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+        _do_instantiate_with_tax_on_send(deps, addr, amount)
     }
 
     // this will set up the instantiation for other tests
@@ -821,7 +825,7 @@ mod tests {
 
     // this will set up the instantiation for other tests that
     // involve taxation
-    fn _do_instantiate_with_tax(
+    fn _do_instantiate_with_tax_on_transfer(
         mut deps: DepsMut,
         addr: &str,
         amount: Uint128,
@@ -833,6 +837,68 @@ mod tests {
                 src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
                 dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
                 proceeds: Addr::unchecked(String::from("proceeds")),
+            },
+            on_send: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            on_send_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            on_transfer_from: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
+            },
+            admin: Addr::unchecked(""),
+        });
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr.to_string(),
+                amount,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: tax_map_in,
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        let meta = query_token_info(deps.as_ref()).unwrap();
+        assert_eq!(
+            meta,
+            TokenInfoResponse {
+                name: "Auto Gen".to_string(),
+                symbol: "AUTO".to_string(),
+                decimals: 3,
+                total_supply: amount,
+            }
+        );
+        assert_eq!(get_balance(deps.as_ref(), addr), amount);
+        meta
+    }
+
+    fn _do_instantiate_with_tax_on_send(
+        mut deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
+
+        // simple flat p2p tax
+        let tax_map_in = Some(TaxMap{
+            on_transfer: TaxInfo {
+                src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                proceeds: Addr::unchecked(""),
             },
             on_send: TaxInfo {
                 src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
@@ -1773,7 +1839,7 @@ mod tests {
             funds: vec![],
         });
 
-        do_instantiate_with_tax(deps.as_mut(), &addr1, amount1);
+        do_instantiate_with_tax_on_transfer(deps.as_mut(), &addr1, amount1);
 
         // test valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
@@ -1950,7 +2016,7 @@ mod tests {
             funds: vec![],
         });
 
-        do_instantiate_with_tax(deps.as_mut(), &addr1, amount1);
+        do_instantiate_with_tax_on_send(deps.as_mut(), &addr1, amount1);
 
         // valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
