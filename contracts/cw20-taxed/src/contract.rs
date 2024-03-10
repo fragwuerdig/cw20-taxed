@@ -310,7 +310,7 @@ pub fn execute_transfer(
     let rcpt_addr = deps.api.addr_validate(&recipient)?;
     let map = TAX_INFO.load(deps.storage)?;
     let rcpt_proceeds = map.on_transfer.proceeds.clone().into_string(); 
-    let (net, tax) = map.on_transfer.deduct_tax(&deps.querier, rcpt_addr.clone(), amount)?;
+    let (net, tax) = map.on_transfer.deduct_tax(&deps.querier, info.sender.clone(), rcpt_addr.clone(), amount)?;
     
     // remove tokens from sender balance
     BALANCES.update(
@@ -448,7 +448,7 @@ pub fn execute_send(
     let map = TAX_INFO.load(deps.storage)?;
     let rcpt_proceeds = map.on_send.proceeds.clone().into_string();
     let rcpt = deps.api.addr_validate(contract.clone().as_str())?;   
-    let (net, tax) = map.on_send.deduct_tax(&deps.querier, rcpt, amount)?;
+    let (net, tax) = map.on_send.deduct_tax(&deps.querier, info.sender.clone(), rcpt, amount)?;
 
     // move net tokens to the contract
     BALANCES.update(

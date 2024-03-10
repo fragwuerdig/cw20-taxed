@@ -164,12 +164,12 @@ impl TaxContractCodeCondition {
 }
 
 impl TaxInfo {
-    pub fn deduct_tax(&self, q: &QuerierWrapper, addr: Addr, amount: Uint128) -> Result<(Uint128, Uint128), ContractError> {
-        let is_taxed = self.src_cond.is_taxed(q, addr.clone())
-            && self.dst_cond.is_taxed(q, addr.clone())
-            && self.proceeds != addr;
+    pub fn deduct_tax(&self, q: &QuerierWrapper, src: Addr, dst: Addr, amount: Uint128) -> Result<(Uint128, Uint128), ContractError> {
+        let is_taxed = self.src_cond.is_taxed(q, src.clone())
+            && self.dst_cond.is_taxed(q, dst.clone())
+            && self.proceeds != dst;
         match is_taxed {
-            true => self.src_cond.tax_deduction(q, addr, amount),
+            true => self.src_cond.tax_deduction(q, src, amount),
             false => Ok((amount, Uint128::zero())),
             
         }
@@ -355,7 +355,7 @@ mod tests {
             dst_cond: TaxCondition::Never(TaxNeverCondition {}),
             proceeds: addr0.clone(),
         };
-        assert_eq!(tax_info.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::zero())));
+        assert_eq!(tax_info.deduct_tax(&qw, addr0.clone(), addr1.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::zero())));
 
         // == Test Tax Deduction for Tax Condition "Contract Code"
         let tax_info_with_tax = TaxInfo {
@@ -363,21 +363,20 @@ mod tests {
                 code_ids: vec![0, 1],
                 tax_rate: Decimal::percent(10),
             }),
-            dst_cond: TaxCondition::ContractCode(TaxContractCodeCondition {
-                code_ids: vec![0, 1],
+            dst_cond: TaxCondition::Always(TaxAlwaysCondition {
                 tax_rate: Decimal::percent(10),
             }),
             proceeds: addr0.clone(),
         };
 
-        // is listed contract but proceeds wallet -> no tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
-        // is a contract and is listed -> tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr1.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
-        // is a contract but not listed -> no tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr2.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+        // is listed contract but dst is proceeds wallet -> no tax
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr1.clone(), addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+        // src is a contract and is listed -> tax
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr0.clone(), addr1.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
+        // src is a contract but not listed -> no tax
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr2.clone(), addr2.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
         // is not a contract -> no tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), addr2.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
 
         // == Test Tax Deduction for tax condition "always" ==
         let tax_info_with_tax = TaxInfo {
@@ -391,11 +390,21 @@ mod tests {
         };
 
         // is proceeds wallet -> no tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
+        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr1.clone(), addr0.clone(), Uint128::new(100)), Ok((Uint128::new(100), Uint128::new(0))));
         // is normal wallet -> tax
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr1.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr2.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
-        assert_eq!(tax_info_with_tax.deduct_tax(&qw, addr3.clone(), Uint128::new(100)), Ok((Uint128::new(90), Uint128::new(10))));
+        assert_eq!(
+            tax_info_with_tax.deduct_tax(&qw, addr1.clone(), addr2.clone(), Uint128::new(100)),
+            Ok((Uint128::new(90), Uint128::new(10)))
+        );
+        assert_eq!(
+
+            tax_info_with_tax.deduct_tax(&qw, addr2.clone(), addr1.clone(), Uint128::new(100)),
+            Ok((Uint128::new(90), Uint128::new(10)))
+        );
+        assert_eq!(
+            tax_info_with_tax.deduct_tax(&qw, addr3.clone(), addr2.clone(), Uint128::new(100)),
+            Ok((Uint128::new(90), Uint128::new(10)))
+        );
 
     }
 
