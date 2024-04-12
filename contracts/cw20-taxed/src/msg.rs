@@ -130,7 +130,9 @@ pub enum QueryMsg {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct MigrateMsg {}
+pub struct MigrateMsg {
+    pub tax_map: Option<TaxMap>,
+}
 
 #[cw_serde]
 pub enum Cw20TaxedExecuteMsg {

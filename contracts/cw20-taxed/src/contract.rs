@@ -721,7 +721,7 @@ pub fn query_download_logo(deps: Deps) -> StdResult<DownloadLogoResponse> {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     let original_version =
         ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -733,6 +733,15 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
         for ((owner, spender), allowance) in data {
             ALLOWANCES_SPENDER.save(deps.storage, (&spender, &owner), &allowance)?;
         }
+    }
+
+    if original_version < "1.1.0+taxed001".parse::<semver::Version>().unwrap() {
+        // Add tax map
+        let tax_map = match msg.tax_map {
+            Some(x) => x,
+            None => TaxMap::default(),
+        };
+        TAX_INFO.save(deps.storage, &tax_map)?;
     }
     Ok(Response::default())
 }
@@ -2152,7 +2161,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: cw20_addr.to_string(),
                     new_code_id: cw20_id,
-                    msg: to_json_binary(&MigrateMsg {}).unwrap(),
+                    msg: to_json_binary(&MigrateMsg { tax_map: None }).unwrap(),
                 }),
             )
             .unwrap();
