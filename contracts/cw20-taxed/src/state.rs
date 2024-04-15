@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Decimal, Uint128};
+use cosmwasm_std::{Addr, Coin, Decimal, Uint128};
 use cw_storage_plus::{Item, Map};
 
 use cw20::{AllowanceResponse, Logo, MarketingInfoResponse};
@@ -39,3 +39,105 @@ pub const ALLOWANCES_SPENDER: Map<(&Addr, &Addr), AllowanceResponse> =
 
 // specific for TAXED token
 pub const TAX_INFO: Item<TaxMap> = Item::new("tax_info");
+
+// specific only for migration from Terraport Tokens
+pub mod migrate_v1 {
+    use std::{backtrace::Backtrace, str::FromStr};
+
+    use cosmwasm_std::{to_json_binary, Addr, CosmosMsg, Order, StdError, StdResult, Storage, Uint128};
+    use cw2::{get_contract_version, set_contract_version};
+    use cw_storage_plus::{Map, SnapshotMap, Strategy};
+    use semver::Version;
+
+    use crate::contract::{CONTRACT_NAME, CONTRACT_NAME_TERRAPORT};
+
+    pub const BALANCES: SnapshotMap<&Addr, Uint128> = SnapshotMap::new(
+        "balance",
+        "balance__checkpoints",
+        "balance__changelog",
+        Strategy::EveryBlock,
+    );
+
+    pub const TOTAL_SUPPLY_HISTORY: Map<u64, Uint128> = Map::new("total_supply_history");
+
+    pub fn is_terraport_token_v0(store: &dyn Storage) -> StdResult<bool> {
+        let version = get_contract_version(store)?;
+        Ok(version.contract == CONTRACT_NAME_TERRAPORT && version.version == "0.0.0")
+    }
+
+    pub fn is_cw20_taxed_v0(store: &dyn Storage) -> StdResult<bool> {
+        let version = get_contract_version(store)?;
+        let this_version = Version::from_str(
+            version.version.as_str(),
+        ).map_err(|_| StdError::generic_err("no valid version in store"))?;
+        let expect_v0 = Version::from_str("1.1.0")
+            .map_err(|_| StdError::generic_err("could not parse version 1.0.0"))?;
+        Ok(version.contract == CONTRACT_NAME && expect_v0 <= this_version)
+    }
+
+    pub fn ensure_known_upgrade_path(store: &mut dyn Storage) -> StdResult<()> {
+
+        if is_terraport_token_v0(store)? {
+            set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
+            return Ok(());
+        } else if is_cw20_taxed_v0(store)? {
+            return Ok(());
+        } else {
+            return Err(StdError::generic_err("This is not a knowledable migration path"));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use cosmwasm_std::testing::MockStorage;
+        use cw2::set_contract_version;
+
+        // setup a terraport style balances store
+        fn setup(balances: Vec<(Addr, Uint128, u64)>) -> MockStorage {
+            let mut store = MockStorage::new();
+            set_contract_version(&mut store, "crates.io:terraport-token", "0.0.0").unwrap();
+            for (addr, balance, height) in balances {
+                BALANCES.save(&mut store, &addr, &balance, height).unwrap();
+            }
+            store
+        }
+
+        #[test]
+        fn test_is_terraport_token_v0() {
+            let mut store = MockStorage::new();
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "1.0.6").unwrap();
+            assert_eq!(is_terraport_token_v0(&store).unwrap(), false);
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "0.0.0").unwrap();
+            assert_eq!(is_terraport_token_v0(&store).unwrap(), false);
+
+            set_contract_version(&mut store, "crates.io:terraport-token", "0.0.0").unwrap();
+            assert_eq!(is_terraport_token_v0(&store).unwrap(), true);
+
+            set_contract_version(&mut store, "crates.io:terraport-token", "1.0.0").unwrap();
+            assert_eq!(is_terraport_token_v0(&store).unwrap(), false);
+        }
+
+        #[test]
+        fn test_terraport_snapshot_map_is_compatible_with_map() {
+            let mut store = setup(vec![
+                // initial balances
+                (Addr::unchecked("addr1"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr2"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr3"), Uint128::new(4455), 123),
+
+                // mock a transfer at later height
+                (Addr::unchecked("addr1"), Uint128::new(1233), 456),
+                (Addr::unchecked("addr2"), Uint128::new(1235), 456),
+            ]);
+
+            // ensure the new data is compatible
+            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr1")).unwrap(), Uint128::new(1233));
+            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr2")).unwrap(), Uint128::new(1235));
+            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr3")).unwrap(), Uint128::new(4455));
+        }
+    }
+
+}

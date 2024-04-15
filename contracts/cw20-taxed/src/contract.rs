@@ -20,14 +20,15 @@ use crate::enumerable::{query_all_accounts, query_owner_allowances, query_spende
 use crate::error::ContractError;
 use crate::msg::{Cw20TaxedExecuteMsg as ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, LOGO, MARKETING_INFO, TAX_INFO, TOKEN_INFO
+    self, MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, LOGO, MARKETING_INFO, TAX_INFO, TOKEN_INFO
 };
 
 use crate::tax::{self, TaxMap};
 
 // version info for migration info
-const CONTRACT_NAME: &str = "crates.io:cw20-base";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CONTRACT_NAME: &str = "crates.io:cw20-base";
+pub const CONTRACT_NAME_TERRAPORT: &str = "crates.io:terraport-token";
+pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const LOGO_SIZE_CAP: usize = 5 * 1024;
 
@@ -722,6 +723,12 @@ pub fn query_download_logo(deps: Deps) -> StdResult<DownloadLogoResponse> {
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+
+    // merge upgrade paths
+    // crates.io:terraport-token 0.0.0 -> crates.io:cw20-base 1.1.0
+    // crates.io:cw20-base 1.1.0 -> crates.io:cw20-base 1.1.0
+    state::migrate_v1::ensure_known_upgrade_path(deps.storage)?;
+
     let original_version =
         ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -736,12 +743,20 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
     }
 
     if original_version < "1.1.0+taxed001".parse::<semver::Version>().unwrap() {
-        // Add tax map
-        let tax_map = match msg.tax_map {
-            Some(x) => x,
-            None => TaxMap::default(),
-        };
-        TAX_INFO.save(deps.storage, &tax_map)?;
+        match TAX_INFO.load(deps.storage) {
+            // there seems to be an existing tax map, so we don't need to do anything
+            Ok(_) => {},
+
+            // no tax map, so we need to add one
+            Err(_) => {
+                // Add tax map
+                let tax_map = match msg.tax_map {
+                    Some(x) => x,
+                    None => TaxMap::default(),
+                };
+                TAX_INFO.save(deps.storage, &tax_map)?;
+            }
+        }
     }
     Ok(Response::default())
 }
