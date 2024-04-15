@@ -13,6 +13,15 @@ The configuration options are laid out in a way such that the tokens use cases i
 
 However, due to technical limitations it is not always possible to map these use-cases 1:1 to a corresponding tax configuration layout. For example: Suppose you list your token on a DEX pool and then want to tax "buy" transactions from that pool. Then a possible tax configuration implementation would be to charge taxes on the `TransferMsg`s that come from that pool: Because `MsgTransfer` is used to send you tokens. But at the same time the pool also uses `MsgTransfer` to send tokens when the user issues an LP withdrawal. There fore it is impossible to distinguish a "buy" transaction from a "LP withdraw" operation from inside the token context, where the source tax is deducted.
 
+## On-Chain Deployments
+
+This is a list of on-chain deployments for this contract:
+
+| Version  | Code ID |
+| -------- | ------- |
+| `v1.1.0` | 8551 |
+| `v1.1.0+taxed001` | 8653 |
+
 ## Instantiation Examples
 
 In order to get a feeling for the tax configuration please refer to these configuration examples that cover some of the common use cases. The aim is to have a configuration that is as flexible and extensible as possible. This goes at a certain cost in terms of configuration verbosity.
