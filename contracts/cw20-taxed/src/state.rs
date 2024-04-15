@@ -94,7 +94,7 @@ pub mod migrate_v1 {
         if is_terraport_token_v0(store)? {
             set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
             return Ok(());
-        
+
         // this is for terraswap tokens - normalize to v1.1.0
         } else if is_terraswap_token_v0(store)? {
             set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
