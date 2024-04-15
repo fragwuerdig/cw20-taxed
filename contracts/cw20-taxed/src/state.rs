@@ -65,6 +65,11 @@ pub mod migrate_v1 {
         Ok(version.contract == CONTRACT_NAME_TERRAPORT && version.version == "0.0.0")
     }
 
+    pub fn is_cw_base_1_0_1(store: &dyn Storage) -> StdResult<bool> {
+        let version = get_contract_version(store)?;
+        Ok(version.contract == "crates.io:cw20-base" && version.version == "1.0.1")
+    }
+
     pub fn is_cw20_taxed_v0(store: &dyn Storage) -> StdResult<bool> {
         let version = get_contract_version(store)?;
         let this_version = Version::from_str(
@@ -76,12 +81,21 @@ pub mod migrate_v1 {
     }
 
     pub fn ensure_known_upgrade_path(store: &mut dyn Storage) -> StdResult<()> {
-
+        // this is for terraport tokens - normalize to v1.1.0
         if is_terraport_token_v0(store)? {
             set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
             return Ok(());
+
+        // this is for first revision of taxed - no normalization needed
         } else if is_cw20_taxed_v0(store)? {
             return Ok(());
+        
+        // this is for FRG tokens - normalize to v1.1.0
+        } else if is_cw_base_1_0_1(store)? {
+            set_contract_version(store, CONTRACT_NAME, "1.1.0")?;
+            return Ok(());
+        
+        // no known migration path -play safe and throw
         } else {
             return Err(StdError::generic_err("This is not a knowledable migration path"));
         }
@@ -120,6 +134,20 @@ pub mod migrate_v1 {
 
             set_contract_version(&mut store, "crates.io:terraport-token", "1.0.0").unwrap();
             assert_eq!(is_terraport_token_v0(&store).unwrap(), false);
+        }
+
+        #[test]
+        fn test_is_cw20_base_1_0_1() {
+            let mut store = MockStorage::new();
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "1.0.6").unwrap();
+            assert_eq!(is_cw_base_1_0_1(&store).unwrap(), false);
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "1.0.1").unwrap();
+            assert_eq!(is_cw_base_1_0_1(&store).unwrap(), true);
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "1.0.0").unwrap();
+            assert_eq!(is_cw_base_1_0_1(&store).unwrap(), false);
         }
 
         #[test]
