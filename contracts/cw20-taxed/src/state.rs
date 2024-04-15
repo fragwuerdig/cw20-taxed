@@ -88,19 +88,21 @@ pub mod migrate_v1 {
     }
 
     #[cfg(test)]
-    mod tests {
+    pub mod tests {
         use super::*;
-        use cosmwasm_std::testing::MockStorage;
+        use cosmwasm_std::{testing::{mock_dependencies, MockApi, MockQuerier, MockStorage}, OwnedDeps};
         use cw2::set_contract_version;
 
-        // setup a terraport style balances store
-        fn setup(balances: Vec<(Addr, Uint128, u64)>) -> MockStorage {
-            let mut store = MockStorage::new();
-            set_contract_version(&mut store, "crates.io:terraport-token", "0.0.0").unwrap();
+        // mock a terraport style store
+        fn mock_dependencies_with_terraport_balances(
+            balances: Vec<(Addr, Uint128, u64)>
+        ) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
+            let mut deps = mock_dependencies();
+            set_contract_version(&mut deps.storage, "crates.io:terraport-token", "0.0.0").unwrap();
             for (addr, balance, height) in balances {
-                BALANCES.save(&mut store, &addr, &balance, height).unwrap();
+                BALANCES.save(&mut deps.storage, &addr, &balance, height).unwrap();
             }
-            store
+            deps
         }
 
         #[test]
@@ -122,7 +124,7 @@ pub mod migrate_v1 {
 
         #[test]
         fn test_terraport_snapshot_map_is_compatible_with_map() {
-            let mut store = setup(vec![
+            let deps = mock_dependencies_with_terraport_balances(vec![
                 // initial balances
                 (Addr::unchecked("addr1"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr2"), Uint128::new(1234), 123),
@@ -134,9 +136,9 @@ pub mod migrate_v1 {
             ]);
 
             // ensure the new data is compatible
-            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr1")).unwrap(), Uint128::new(1233));
-            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr2")).unwrap(), Uint128::new(1235));
-            assert_eq!(super::BALANCES.load(&store, &Addr::unchecked("addr3")).unwrap(), Uint128::new(4455));
+            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr1")).unwrap(), Uint128::new(1233));
+            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr2")).unwrap(), Uint128::new(1235));
+            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr3")).unwrap(), Uint128::new(4455));
         }
     }
 
