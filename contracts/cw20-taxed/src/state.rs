@@ -94,7 +94,7 @@ pub mod migrate_v1 {
         use cw2::set_contract_version;
 
         // mock a terraport style store
-        fn mock_dependencies_with_terraport_balances(
+        pub fn mock_dependencies_with_terraport_balances(
             balances: Vec<(Addr, Uint128, u64)>
         ) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
             let mut deps = mock_dependencies();

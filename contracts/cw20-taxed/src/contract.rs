@@ -2098,6 +2098,10 @@ mod tests {
     }
 
     mod migration {
+        use std::{borrow::{Borrow, BorrowMut}, mem};
+
+        use self::state::migrate_v1::tests::mock_dependencies_with_terraport_balances;
+
         use super::*;
 
         use cosmwasm_std::Empty;
@@ -2214,6 +2218,130 @@ mod tests {
                     expires
                 }]
             );
+        }
+
+        #[test]
+        fn test_migrate_from_terraport() {
+            let mut deps = mock_dependencies_with_terraport_balances(vec![
+                // initial balances
+                (Addr::unchecked("addr1"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr2"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr3"), Uint128::new(4455), 123),
+
+                // mock a transfer at later height
+                (Addr::unchecked("addr1"), Uint128::new(1233), 456),
+                (Addr::unchecked("addr2"), Uint128::new(1235), 456),
+            ]);
+            
+            let env = mock_env();
+            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: None }).unwrap();
+
+            // balances are ok
+            match query_balance(deps.as_ref(), "addr1".to_string()){
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse{
+                            balance: Uint128::new(1233),
+                        }
+                    )
+                },
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+            match query_balance(deps.as_ref(), "addr2".to_string()){
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse{
+                            balance: Uint128::new(1235),
+                        }
+                    )
+                },
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+
+            // tax map is set
+            match TAX_INFO.load(deps.as_ref().storage) {
+                Ok(tax_info) => {
+                    assert_eq!(tax_info, TaxMap::default() )
+                },
+                Err(_) => panic!("Expected Tax map to be available!"),
+            }
+            
+        }
+
+        #[test]
+        fn test_migrate_from_terraport_with_explicit_tax_map() {
+            let mut deps = mock_dependencies_with_terraport_balances(vec![
+                // initial balances
+                (Addr::unchecked("addr1"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr2"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr3"), Uint128::new(4455), 123),
+
+                // mock a transfer at later height
+                (Addr::unchecked("addr1"), Uint128::new(1233), 456),
+                (Addr::unchecked("addr2"), Uint128::new(1235), 456),
+            ]);
+            let tax = TaxMap {
+                admin: Addr::unchecked("admin"),
+                on_transfer: TaxInfo{
+                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    proceeds: Addr::unchecked("proceeds1"),
+                },
+                on_transfer_from: TaxInfo {
+                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    proceeds: Addr::unchecked("proceeds2"),
+                },
+                on_send: TaxInfo {
+                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    proceeds: Addr::unchecked("proceeds3"),
+                
+                },
+                on_send_from: TaxInfo{
+                    src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(1)}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    proceeds: Addr::unchecked("proceeds4"),
+                }
+            };
+            
+            let env = mock_env();
+            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: Some(tax.clone()) }).unwrap();
+
+            // balances are ok
+            match query_balance(deps.as_ref(), "addr1".to_string()){
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse{
+                            balance: Uint128::new(1233),
+                        }
+                    )
+                },
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+            match query_balance(deps.as_ref(), "addr2".to_string()){
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse{
+                            balance: Uint128::new(1235),
+                        }
+                    )
+                },
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+
+            // tax map is set
+            match TAX_INFO.load(deps.as_ref().storage) {
+                Ok(tax_info) => {
+                    assert_eq!(tax_info, tax )
+                },
+                Err(_) => panic!("Expected Tax map to be available!"),
+            }
+            
         }
     }
 
