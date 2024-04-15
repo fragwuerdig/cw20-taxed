@@ -80,6 +80,10 @@ pub mod migrate_v1 {
         Ok(version.contract == CONTRACT_NAME && expect_v0 <= this_version)
     }
 
+    /// this is to ensure contract version is normalized to 1.1.0 of the
+    /// cw20-taxed contract in cases we have tokens that were not cw20-taxed
+    /// before. Only allow specific known migration paths and normalize
+    /// the contract version to 1.1.0
     pub fn ensure_known_upgrade_path(store: &mut dyn Storage) -> StdResult<()> {
         // this is for terraport tokens - normalize to v1.1.0
         if is_terraport_token_v0(store)? {
