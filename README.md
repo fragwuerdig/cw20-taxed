@@ -22,6 +22,32 @@ This is a list of on-chain deployments for this contract:
 | `v1.1.0` | 8551 |
 | `v1.1.0+taxed001` | 8654 |
 
+## Instructions to Migrate from Terraport/Terraswap Tokens
+
+Terraport and Terraswap offer token factories in order to create and manage tokens in a user-friendly manner. These are stock cw20 contracts. Some might want to migrate from these tokens to this contract. Please follow these instructions:
+
+1. Head to [Galaxy Station](https://station.terraclassic.community/contract) OR [TC Wallet](https://wallet.terra-classic.io/contracts)
+2. Make sure Galaxy Extension or Keplr is connected to your tokens admin wallet 
+3. In the search field type your token contract address address
+4. When your token contract appears, click on "Migrate"
+5. In the migration dialog use code id 8654
+6. Type the migration message (see below these instructions)
+7. Hit "Confirm" or "Ok" to sign your transaction
+
+The migration message depends on what tax type your token shall have. Refer to the [instantiation examples] below to find the tax map that suits you. The general structure of the migration message will be:
+
+```
+{
+  "tax_map": {
+    "admin": " ... ",
+    "on_transfer": { ... },
+    "on_send": { ... },
+    "on_transfer_from": { ... },
+    "on_send_from": { ... },
+  }
+}
+```
+
 ## Instantiation Examples
 
 In order to get a feeling for the tax configuration please refer to these configuration examples that cover some of the common use cases. The aim is to have a configuration that is as flexible and extensible as possible. This goes at a certain cost in terms of configuration verbosity.
