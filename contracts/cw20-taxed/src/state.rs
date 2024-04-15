@@ -49,7 +49,7 @@ pub mod migrate_v1 {
     use cw_storage_plus::{Map, SnapshotMap, Strategy};
     use semver::Version;
 
-    use crate::contract::{CONTRACT_NAME, CONTRACT_NAME_TERRAPORT};
+    use crate::contract::{CONTRACT_NAME, CONTRACT_NAME_TERRAPORT, CONTRACT_NAME_TERRASWAP};
 
     pub const BALANCES: SnapshotMap<&Addr, Uint128> = SnapshotMap::new(
         "balance",
@@ -63,6 +63,11 @@ pub mod migrate_v1 {
     pub fn is_terraport_token_v0(store: &dyn Storage) -> StdResult<bool> {
         let version = get_contract_version(store)?;
         Ok(version.contract == CONTRACT_NAME_TERRAPORT && version.version == "0.0.0")
+    }
+
+    pub fn is_terraswap_token_v0(store: &dyn Storage) -> StdResult<bool> {
+        let version = get_contract_version(store)?;
+        Ok(version.contract == CONTRACT_NAME_TERRASWAP && version.version == "0.0.0")
     }
 
     pub fn is_cw_base_1_0_1(store: &dyn Storage) -> StdResult<bool> {
@@ -87,6 +92,11 @@ pub mod migrate_v1 {
     pub fn ensure_known_upgrade_path(store: &mut dyn Storage) -> StdResult<()> {
         // this is for terraport tokens - normalize to v1.1.0
         if is_terraport_token_v0(store)? {
+            set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
+            return Ok(());
+        
+        // this is for terraswap tokens - normalize to v1.1.0
+        } else if is_terraswap_token_v0(store)? {
             set_contract_version(store, "crates.io:cw20-base", "1.1.0")?;
             return Ok(());
 
@@ -152,6 +162,23 @@ pub mod migrate_v1 {
 
             set_contract_version(&mut store, "crates.io:cw20-base", "1.0.0").unwrap();
             assert_eq!(is_cw_base_1_0_1(&store).unwrap(), false);
+        }
+
+        #[test]
+        fn test_is_terraswap_token_v0(){
+            let mut store = MockStorage::new();
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "1.0.6").unwrap();
+            assert_eq!(is_terraswap_token_v0(&store).unwrap(), false);
+
+            set_contract_version(&mut store, "crates.io:cw20-base", "0.0.0").unwrap();
+            assert_eq!(is_terraswap_token_v0(&store).unwrap(), false);
+
+            set_contract_version(&mut store, "crates.io:terraswap-token", "0.0.0").unwrap();
+            assert_eq!(is_terraswap_token_v0(&store).unwrap(), true);
+
+            set_contract_version(&mut store, "crates.io:terraswap-token", "1.0.0").unwrap();
+            assert_eq!(is_terraswap_token_v0(&store).unwrap(), false);
         }
 
         #[test]

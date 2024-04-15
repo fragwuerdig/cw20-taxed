@@ -28,6 +28,7 @@ use crate::tax::{self, TaxMap};
 // version info for migration info
 pub const CONTRACT_NAME: &str = "crates.io:cw20-base";
 pub const CONTRACT_NAME_TERRAPORT: &str = "crates.io:terraport-token";
+pub const CONTRACT_NAME_TERRASWAP: &str = "crates.io:terraswap-token";
 pub const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const LOGO_SIZE_CAP: usize = 5 * 1024;
