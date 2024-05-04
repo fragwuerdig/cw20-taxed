@@ -1,13 +1,5 @@
 [workspace]
-members = ["packages/*", "contracts/*"]
-
-[profile.release.package.cw20-base]
-codegen-units = 1
-incremental = false
-
-[profile.release.package.cw20-ics20]
-codegen-units = 1
-incremental = false
+members = ["contracts/*"]
 
 [profile.release]
 rpath = false
