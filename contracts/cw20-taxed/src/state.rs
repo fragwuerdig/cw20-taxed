@@ -1,10 +1,11 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Coin, Decimal, Uint128};
+use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::{Item, Map};
 
 use cw20::{AllowanceResponse, Logo, MarketingInfoResponse};
 
-use crate::tax::{TaxInfo, TaxMap};
+use crate::tax::TaxMap;
+use crate::whale::WhaleInfo;
 
 #[cw_serde]
 pub struct TokenInfo {
@@ -40,11 +41,15 @@ pub const ALLOWANCES_SPENDER: Map<(&Addr, &Addr), AllowanceResponse> =
 // specific for TAXED token
 pub const TAX_INFO: Item<TaxMap> = Item::new("tax_info");
 
+// anti whale measures
+pub const ANTI_WHALE_INFO: Item<WhaleInfo> = Item::new("whale_info");
+
+
 // specific only for migration from Terraport Tokens
 pub mod migrate_v1 {
-    use std::{backtrace::Backtrace, str::FromStr};
+    use std::str::FromStr;
 
-    use cosmwasm_std::{to_json_binary, Addr, CosmosMsg, Order, StdError, StdResult, Storage, Uint128};
+    use cosmwasm_std::{Addr, StdError, StdResult, Storage, Uint128};
     use cw2::{get_contract_version, set_contract_version};
     use cw_storage_plus::{Map, SnapshotMap, Strategy};
     use semver::Version;

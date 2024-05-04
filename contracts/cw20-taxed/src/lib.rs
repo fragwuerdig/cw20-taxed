@@ -21,5 +21,6 @@ mod error;
 pub mod msg;
 pub mod state;
 pub mod tax;
+pub mod whale;
 
 pub use crate::error::ContractError;
