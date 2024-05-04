@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo, QuerierWrapper, Response, StdError, StdResult, Uint128, WasmMsg
+    to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg
 };
 
 use cw2::{ensure_from_older_version, set_contract_version};
@@ -23,7 +23,7 @@ use crate::state::{
     self, MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, LOGO, MARKETING_INFO, TAX_INFO, TOKEN_INFO
 };
 
-use crate::tax::{self, TaxMap};
+use crate::tax::TaxMap;
 
 // version info for migration info
 pub const CONTRACT_NAME: &str = "crates.io:cw20-base";
@@ -767,7 +767,7 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
-    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, Never, StdError, SubMsg, WasmMsg};
+    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, Decimal, StdError, SubMsg, WasmMsg};
 
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
@@ -2099,13 +2099,10 @@ mod tests {
     }
 
     mod migration {
-        use std::{borrow::{Borrow, BorrowMut}, mem};
-
         use self::state::migrate_v1::tests::mock_dependencies_with_terraport_balances;
-
         use super::*;
 
-        use cosmwasm_std::Empty;
+        use cosmwasm_std::{Empty, Decimal};
         use cw20::{AllAllowancesResponse, AllSpenderAllowancesResponse, SpenderAllowanceInfo};
         use cw_multi_test::{App, Contract, ContractWrapper, Executor};
 

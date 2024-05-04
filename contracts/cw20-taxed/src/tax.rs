@@ -1,7 +1,5 @@
-use std::any::Any;
-
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{ Addr, Decimal, Empty, Querier, QuerierWrapper, StdError, StdResult, Uint128, WasmQuery};
+use cosmwasm_std::{ Addr, Decimal, QuerierWrapper, StdError, StdResult, Uint128};
 use crate::error::ContractError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -177,21 +175,21 @@ impl TaxInfo {
 }
 
 impl TaxDeductible for TaxNeverCondition {
-    fn is_taxed(&self, _: &QuerierWrapper, addr: Addr) -> bool {
+    fn is_taxed(&self, _: &QuerierWrapper, _addr: Addr) -> bool {
         false
     }
 
-    fn tax_rate(&self, _: &QuerierWrapper,  addr: Addr) -> Decimal {
+    fn tax_rate(&self, _: &QuerierWrapper,  _addr: Addr) -> Decimal {
         Decimal::zero()
     }
 }
 
 impl TaxDeductible for TaxAlwaysCondition {
-    fn is_taxed(&self, _: &QuerierWrapper, addr: Addr) -> bool {
+    fn is_taxed(&self, _: &QuerierWrapper, _addr: Addr) -> bool {
         true
     }
 
-    fn tax_rate(&self, _: &QuerierWrapper,  addr: Addr) -> Decimal {
+    fn tax_rate(&self, _: &QuerierWrapper,  _addr: Addr) -> Decimal {
         self.tax_rate
     }
 }
@@ -217,8 +215,7 @@ impl TaxDeductible for TaxContractCodeCondition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::MockQuerier;
-    use cosmwasm_std::{to_json_binary, Addr, ContractInfoResponse, ContractResult, Decimal, QuerierResult, StdResult, Uint128};
+    use cosmwasm_std::{to_json_binary, Addr, ContractInfoResponse, ContractResult, Decimal, QuerierResult, StdResult, Uint128, WasmQuery};
 
     fn get_info(addr: &Addr) -> StdResult<ContractInfoResponse> {
 

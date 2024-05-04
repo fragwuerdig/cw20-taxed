@@ -1,7 +1,7 @@
 use cosmwasm_std::{
     attr, to_json_binary, Addr, Binary, BlockInfo, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult, Storage, Uint128, WasmMsg
 };
-use cw20::{AllowanceResponse, Cw20ExecuteMsg, Cw20ReceiveMsg, Expiration};
+use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
 
 use crate::msg::Cw20TaxedExecuteMsg as ExecuteMsg;
 
@@ -324,7 +324,6 @@ mod tests {
     use cosmwasm_std::testing::{mock_dependencies_with_balance, mock_env, mock_info};
     use cosmwasm_std::{coins, CosmosMsg, Decimal, Empty, SubMsg, Timestamp, WasmMsg};
     use cw20::{Cw20Coin, TokenInfoResponse};
-    use cw20_base::msg;
 
     use crate::contract::{execute, instantiate, query_balance, query_token_info};
     use crate::msg::{Cw20TaxedExecuteMsg as ExecuteMsg, InstantiateMsg};

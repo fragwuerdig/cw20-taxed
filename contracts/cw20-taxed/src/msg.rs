@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Binary, Decimal, StdError, StdResult, Uint128};
+use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
 use cw20::{Cw20Coin, Expiration, Logo, MinterResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

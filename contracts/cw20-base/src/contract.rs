@@ -624,7 +624,7 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
-    use cosmwasm_std::{coins, from_binary, Addr, CosmosMsg, StdError, SubMsg, WasmMsg};
+    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, StdError, SubMsg, WasmMsg};
 
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
@@ -977,7 +977,7 @@ mod tests {
         assert!(res.is_ok());
         let query_minter_msg = QueryMsg::Minter {};
         let res = query(deps.as_ref(), env, query_minter_msg);
-        let mint: MinterResponse = from_binary(&res.unwrap()).unwrap();
+        let mint: MinterResponse = from_json(&res.unwrap()).unwrap();
 
         // Minter cannot update cap.
         assert!(mint.cap == cap);
@@ -1027,7 +1027,7 @@ mod tests {
         assert!(res.is_ok());
         let query_minter_msg = QueryMsg::Minter {};
         let res = query(deps.as_ref(), env, query_minter_msg);
-        let mint: Option<MinterResponse> = from_binary(&res.unwrap()).unwrap();
+        let mint: Option<MinterResponse> = from_json(&res.unwrap()).unwrap();
 
         // Check that mint information was removed.
         assert_eq!(mint, None);
@@ -1144,7 +1144,7 @@ mod tests {
             QueryMsg::Balance { address: addr1 },
         )
         .unwrap();
-        let loaded: BalanceResponse = from_binary(&data).unwrap();
+        let loaded: BalanceResponse = from_json(&data).unwrap();
         assert_eq!(loaded.balance, amount1);
 
         // check balance query (empty)
@@ -1156,7 +1156,7 @@ mod tests {
             },
         )
         .unwrap();
-        let loaded: BalanceResponse = from_binary(&data).unwrap();
+        let loaded: BalanceResponse = from_json(&data).unwrap();
         assert_eq!(loaded.balance, Uint128::zero());
     }
 
