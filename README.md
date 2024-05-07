@@ -188,6 +188,19 @@ This is a token that charges taxes on plain p2p transfers. Sending to contracts 
 }
 ```
 
+## Changing The Tax Map
+
+If you want to change the tax layout, then the existing tax map can be modified by sending an `UpdateTaxMap` message to the token contract. For axample, you can open Galaxy Station, click on "Contract" on the left navigation bar. Then enter your contract address and click on "Execute". Now you have the chance to drop the execute message:
+
+```
+{
+   "set_tax_map": {
+      "tax_map": <your-tax-map-obj-here>
+}
+```
+
+Now you can fire the message. After successful tx execution the tax map should be updated properly. A contract smart-query to retrieve the currently active tax map is yet to be implemented. 
+
 ## Disclaimer
 
 The code of this project **IS NOT AUDITED**. So please, proceed very carfully when using this software.
