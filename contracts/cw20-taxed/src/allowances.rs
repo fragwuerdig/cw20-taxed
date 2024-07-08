@@ -6,7 +6,7 @@ use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
 use crate::msg::Cw20TaxedExecuteMsg as ExecuteMsg;
 
 use crate::error::ContractError;
-use crate::state::{ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, TAX_INFO, TOKEN_INFO};
+use crate::state::{ALLOWANCES, ALLOWANCES_SPENDER, ANTI_WHALE_INFO, BALANCES, TAX_INFO, TOKEN_INFO};
 
 pub fn execute_increase_allowance(
     deps: DepsMut,
@@ -135,6 +135,7 @@ pub fn execute_transfer_from(
     let map = TAX_INFO.load(deps.storage)?;
     let rcpt_proceeds = map.on_transfer_from.proceeds.clone().into_string(); 
     let (net, tax) = map.on_transfer_from.deduct_tax(&deps.querier, owner_addr.clone(), rcpt_addr.clone(), amount)?;
+    let whale_info = ANTI_WHALE_INFO.load(deps.storage)?;
 
     // deduct allowance before doing anything else have enough allowance
     deduct_allowance(deps.storage, &owner_addr, &info.sender, &env.block, amount)?;
@@ -161,6 +162,10 @@ pub fn execute_transfer_from(
         &rcpt_addr,
         |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + net) },
     )?;
+
+    // assert whale policy
+    let new_balance = BALANCES.load(deps.storage, &rcpt_addr)?;
+    whale_info.assert_no_whale(deps.as_ref().storage, &rcpt_addr, new_balance)?;
 
     // construct msg to send tax to proceeds wallet
     let tax_msg = CosmosMsg::Wasm( WasmMsg::Execute {
@@ -243,6 +248,7 @@ pub fn execute_send_from(
     let map = TAX_INFO.load(deps.storage)?;
     let rcpt_proceeds = map.on_send_from.proceeds.clone().into_string();
     let (net, tax) = map.on_send_from.deduct_tax(&deps.querier, info.sender.clone(), rcpt_addr.clone(), amount)?;
+    let whale_info = ANTI_WHALE_INFO.load(deps.storage)?;
 
     // deduct allowance before doing anything else have enough allowance
     deduct_allowance(deps.storage, &owner_addr, &info.sender, &env.block, amount)?;
@@ -260,6 +266,10 @@ pub fn execute_send_from(
         &rcpt_addr,
         |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + net) },
     )?;
+
+    // assert whale policy
+    let new_balance = BALANCES.load(deps.storage, &rcpt_addr)?;
+    whale_info.assert_no_whale(deps.as_ref().storage, &rcpt_addr, new_balance)?;
 
     // move tax to this token
     BALANCES.update(

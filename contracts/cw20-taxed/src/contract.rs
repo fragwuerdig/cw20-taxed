@@ -477,8 +477,9 @@ pub fn execute_send(
     let (net, tax) = map
         .on_send
         .deduct_tax(&deps.querier, info.sender.clone(), rcpt, amount)?;
+    let whale_info = ANTI_WHALE_INFO.load(deps.storage)?;
 
-    // move net tokens to the contract
+    // move tokens to the contract
     BALANCES.update(
         deps.storage,
         &info.sender,
@@ -491,6 +492,10 @@ pub fn execute_send(
         &rcpt_addr,
         |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + net) },
     )?;
+
+    //assert whale policy
+    let new_balance = BALANCES.load(deps.storage, &rcpt_addr)?;
+    whale_info.assert_no_whale(deps.as_ref().storage, &rcpt_addr, new_balance)?;
 
     // move tax to this token
     BALANCES.update(
@@ -791,7 +796,7 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
-    use cosmwasm_std::{coins, from_json, Addr, CosmosMsg, Decimal, StdError, SubMsg, WasmMsg};
+    use cosmwasm_std::{coins, from_json, to_binary, Addr, CosmosMsg, Decimal, StdError, SubMsg, WasmMsg};
 
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
@@ -2087,6 +2092,96 @@ mod tests {
         let msg = ExecuteMsg::Transfer {
             recipient: whale1.clone(),
             amount: invalid_transfer_amount,
+        };
+
+        // addr1 -> addr2 successive transfer now hitting whale limit but allowed -> valid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(get_balance(deps.as_ref(), whale1.clone()), invalid_transfer_amount);
+        
+    }
+
+    #[test]
+    fn send_successive_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let valid_transfer_amount = Uint128::from(100_000u128);
+        let invalid_transfer_amount = Uint128::from(300_000u128);
+
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> addr2 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
+            contract: addr2.clone(),
+            amount: valid_transfer_amount,
+            msg: to_json_binary("{}").unwrap(),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(res.messages.len(), 1); //expecting proceeds message
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount);
+
+        // addr1 -> addr2 successive transfer not hitting whale limit -> valid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(res.messages.len(), 1);
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount.checked_mul(Uint128::from(2u64)).unwrap());
+
+        // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
+        assert!(res.is_err());
+        
+    }
+
+    #[test]
+    fn send_single_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let invalid_transfer_amount = Uint128::from(300_000u128);
+
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> addr2 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
+            contract: addr2.clone(),
+            amount: invalid_transfer_amount,
+            msg: to_json_binary("{}").unwrap(),
+        };
+
+        // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
+        assert!(res.is_err());
+        
+    }
+
+    #[test]
+    fn send_single_to_allowed_whale_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let invalid_transfer_amount = Uint128::from(300_000u64);
+
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> whale1 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
+            contract: whale1.clone(),
+            amount: invalid_transfer_amount,
+            msg: to_json_binary("{}").unwrap(),
         };
 
         // addr1 -> addr2 successive transfer now hitting whale limit but allowed -> valid
