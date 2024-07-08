@@ -1,7 +1,10 @@
 use cosmwasm_std::{Addr, Decimal, StdError, StdResult, Storage, Uint128};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::state::TOKEN_INFO;
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct WhaleInfo  {
     // percent of total supply that can be acquired by a single address
     pub threshold: Decimal,

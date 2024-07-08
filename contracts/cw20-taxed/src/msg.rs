@@ -4,7 +4,7 @@ use cw20::{Cw20Coin, Expiration, Logo, MinterResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::tax::TaxMap;
+use crate::{tax::TaxMap, whale::WhaleInfo};
 
 #[cw_serde]
 pub struct InstantiateMarketingInfo {
@@ -24,6 +24,7 @@ pub struct InstantiateMsg {
     pub mint: Option<MinterResponse>,
     pub marketing: Option<InstantiateMarketingInfo>,
     pub tax_map: Option<TaxMap>,
+    pub whale_info: Option<WhaleInfo>,
 }
 
 pub struct InstantiateTaxMap {
@@ -70,6 +71,13 @@ impl InstantiateMsg {
             if (*byte != 45) && (*byte < 65 || *byte > 90) && (*byte < 97 || *byte > 122) {
                 return false;
             }
+        }
+        true
+    }
+
+    fn has_valid_whale_info(&self) -> bool {
+        if let Some(whale_info) = &self.whale_info {
+            return whale_info.validate().is_ok();
         }
         true
     }
@@ -204,6 +212,10 @@ pub enum Cw20TaxedExecuteMsg {
     /// Tax extension related
     SetTaxMap { tax_map: Option<TaxMap> },      // empty resets tax map to default
     SetTaxAdmin { tax_admin: Option<String> },  // empty resets tax_admin to ""
+
+    /// Whale extension related
+    SetWhaleInfo { whale_info: Option<WhaleInfo> }, // empty resets whale_info to default
+    SetWhaleAdmin { whale_admin: Option<String> }, // empty resets whale_admin to ""
 }
 
 #[cfg(test)]

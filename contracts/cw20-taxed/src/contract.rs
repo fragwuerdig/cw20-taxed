@@ -1,8 +1,10 @@
+use std::f32::consts::E;
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg
+    to_json_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg
 };
 
 use cw2::{ensure_from_older_version, set_contract_version};
@@ -10,7 +12,6 @@ use cw20::{
     BalanceResponse, Cw20Coin, Cw20ReceiveMsg, DownloadLogoResponse, EmbeddedLogo, Logo, LogoInfo,
     MarketingInfoResponse, MinterResponse, TokenInfoResponse,
 };
-
 
 use crate::allowances::{
     execute_burn_from, execute_decrease_allowance, execute_increase_allowance, execute_send_from,
@@ -20,10 +21,12 @@ use crate::enumerable::{query_all_accounts, query_owner_allowances, query_spende
 use crate::error::ContractError;
 use crate::msg::{Cw20TaxedExecuteMsg as ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    self, MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, LOGO, MARKETING_INFO, TAX_INFO, TOKEN_INFO
+    self, MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, ANTI_WHALE_INFO, BALANCES, LOGO,
+    MARKETING_INFO, TAX_INFO, TOKEN_INFO,
 };
 
 use crate::tax::TaxMap;
+use crate::whale::{self, WhaleInfo};
 
 // version info for migration info
 pub const CONTRACT_NAME: &str = "crates.io:cw20-base";
@@ -98,15 +101,14 @@ fn verify_logo(logo: &Logo) -> Result<(), ContractError> {
 pub fn instantiate(
     mut deps: DepsMut,
     _env: Env,
-    _info: MessageInfo,
+    info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    
+
     // check valid token info
     msg.validate()?;
-    
+
     // create initial accounts
     let total_supply = create_accounts(&mut deps, &msg.initial_balances)?;
 
@@ -165,6 +167,18 @@ pub fn instantiate(
     };
     tax_info.validate()?;
     TAX_INFO.save(deps.storage, &tax_info)?;
+
+    let whale_info = match msg.whale_info {
+        Some(x) => x,
+        None => WhaleInfo {
+            threshold: Decimal::percent(100),
+            whitelist: vec![],
+            admin: Addr::unchecked(info.sender.clone()),
+        
+        },
+    };
+
+    ANTI_WHALE_INFO.save(deps.storage, &whale_info)?;
 
     Ok(Response::default())
 }
@@ -250,6 +264,10 @@ pub fn execute(
         // Tax related extension
         ExecuteMsg::SetTaxMap { tax_map } => execute_set_tax_map(deps, env, info, tax_map),
         ExecuteMsg::SetTaxAdmin { tax_admin } => execute_set_tax_admin(deps, env, info, tax_admin),
+
+        // WhaleInfo related extension
+        ExecuteMsg::SetWhaleInfo { whale_info } => panic!("Not implemented"),
+        ExecuteMsg::SetWhaleAdmin { whale_admin } => panic!("Not implemented"),
     }
 }
 
@@ -257,11 +275,11 @@ pub fn execute_set_tax_map(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    tax_map: Option<TaxMap>
+    tax_map: Option<TaxMap>,
 ) -> Result<Response, ContractError> {
     let curr_tax_map = TAX_INFO.load(deps.storage)?;
     if curr_tax_map.admin != info.sender {
-        return Err(ContractError::Unauthorized {  })
+        return Err(ContractError::Unauthorized {});
     }
     let new_tax_map = match tax_map {
         Some(x) => x,
@@ -270,26 +288,24 @@ pub fn execute_set_tax_map(
             let mut def = TaxMap::default();
             def.admin = curr_tax_map.admin;
             def
-        },
+        }
     };
 
     new_tax_map.validate()?;
     TAX_INFO.save(deps.storage, &new_tax_map)?;
 
-    Ok(Response::new()
-        .add_attribute("admin", new_tax_map.admin)
-    )
+    Ok(Response::new().add_attribute("admin", new_tax_map.admin))
 }
 
 pub fn execute_set_tax_admin(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    tax_admin: Option<String>
+    tax_admin: Option<String>,
 ) -> Result<Response, ContractError> {
     let mut tax_map = TAX_INFO.load(deps.storage)?;
     if tax_map.admin != info.sender {
-        return Err(ContractError::Unauthorized {  })
+        return Err(ContractError::Unauthorized {});
     }
     tax_map.admin = match tax_admin {
         Some(x) => deps.api.addr_validate(&x)?,
@@ -297,9 +313,7 @@ pub fn execute_set_tax_admin(
     };
     TAX_INFO.save(deps.storage, &tax_map)?;
 
-    Ok(Response::new()
-        .add_attribute("admin", tax_map.admin)
-    )
+    Ok(Response::new().add_attribute("admin", tax_map.admin))
 }
 
 pub fn execute_transfer(
@@ -311,9 +325,15 @@ pub fn execute_transfer(
 ) -> Result<Response, ContractError> {
     let rcpt_addr = deps.api.addr_validate(&recipient)?;
     let map = TAX_INFO.load(deps.storage)?;
-    let rcpt_proceeds = map.on_transfer.proceeds.clone().into_string(); 
-    let (net, tax) = map.on_transfer.deduct_tax(&deps.querier, info.sender.clone(), rcpt_addr.clone(), amount)?;
-    
+    let rcpt_proceeds = map.on_transfer.proceeds.clone().into_string();
+    let (net, tax) = map.on_transfer.deduct_tax(
+        &deps.querier,
+        info.sender.clone(),
+        rcpt_addr.clone(),
+        amount,
+    )?;
+    let whale_info = ANTI_WHALE_INFO.load(deps.storage)?;
+
     // remove tokens from sender balance
     BALANCES.update(
         deps.storage,
@@ -337,13 +357,16 @@ pub fn execute_transfer(
         |balance: Option<Uint128>| -> StdResult<_> { Ok(balance.unwrap_or_default() + net) },
     )?;
 
+    // assert whale policy
+    let new_balance = BALANCES.load(deps.storage, &rcpt_addr)?;
+    whale_info.assert_no_whale(deps.as_ref().storage, &rcpt_addr, new_balance)?;
+
     // construct msg to send tax to proceeds wallet
-    let tax_msg = CosmosMsg::Wasm( WasmMsg::Execute {
+    let tax_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: env.contract.address.into(),
-        msg: to_json_binary(
-            &ExecuteMsg::Transfer {
-                recipient: rcpt_proceeds.clone(),
-                amount: tax,
+        msg: to_json_binary(&ExecuteMsg::Transfer {
+            recipient: rcpt_proceeds.clone(),
+            amount: tax,
         })?,
         funds: vec![],
     });
@@ -355,14 +378,15 @@ pub fn execute_transfer(
         .add_attribute("amount", amount);
 
     if tax.gt(&Uint128::zero()) {
-        let tax_res = res.clone()
+        let tax_res = res
+            .clone()
             .add_attribute("net", net)
             .add_attribute("tax", tax)
             .add_attribute("proceeds", &rcpt_proceeds)
             .add_message(tax_msg);
         return Ok(tax_res);
     }
-        
+
     Ok(res)
 }
 
@@ -449,8 +473,10 @@ pub fn execute_send(
     let rcpt_addr = deps.api.addr_validate(&contract.clone())?;
     let map = TAX_INFO.load(deps.storage)?;
     let rcpt_proceeds = map.on_send.proceeds.clone().into_string();
-    let rcpt = deps.api.addr_validate(contract.clone().as_str())?;   
-    let (net, tax) = map.on_send.deduct_tax(&deps.querier, info.sender.clone(), rcpt, amount)?;
+    let rcpt = deps.api.addr_validate(contract.clone().as_str())?;
+    let (net, tax) = map
+        .on_send
+        .deduct_tax(&deps.querier, info.sender.clone(), rcpt, amount)?;
 
     // move net tokens to the contract
     BALANCES.update(
@@ -482,12 +508,11 @@ pub fn execute_send(
     .into_cosmos_msg(contract)?;
 
     // construct msg to send tax to proceeds wallet
-    let tax_msg = CosmosMsg::Wasm( WasmMsg::Execute {
+    let tax_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: env.contract.address.into(),
-        msg: to_json_binary(
-            &ExecuteMsg::Transfer {
-                recipient: rcpt_proceeds.clone(),
-                amount: tax
+        msg: to_json_binary(&ExecuteMsg::Transfer {
+            recipient: rcpt_proceeds.clone(),
+            amount: tax,
         })?,
         funds: vec![],
     });
@@ -501,7 +526,8 @@ pub fn execute_send(
         .add_message(net_msg);
 
     if tax.gt(&Uint128::zero()) {
-        let tax_res = res.clone()
+        let tax_res = res
+            .clone()
             .add_attribute("net", net)
             .add_attribute("tax", tax)
             .add_attribute("proceeds", &rcpt_proceeds)
@@ -510,7 +536,6 @@ pub fn execute_send(
     }
 
     Ok(res)
-    
 }
 
 pub fn execute_update_minter(
@@ -724,7 +749,6 @@ pub fn query_download_logo(deps: Deps) -> StdResult<DownloadLogoResponse> {
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-
     // merge upgrade paths
     // crates.io:terraport-token 0.0.0 -> crates.io:cw20-base 1.1.0
     // crates.io:cw20-base 1.1.0 -> crates.io:cw20-base 1.1.0
@@ -746,7 +770,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
     if original_version < "1.1.0+taxed001".parse::<semver::Version>().unwrap() {
         match TAX_INFO.load(deps.storage) {
             // there seems to be an existing tax map, so we don't need to do anything
-            Ok(_) => {},
+            Ok(_) => {}
 
             // no tax map, so we need to add one
             Err(_) => {
@@ -772,6 +796,7 @@ mod tests {
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
     use crate::tax::{TaxAlwaysCondition, TaxCondition, TaxInfo, TaxNeverCondition};
+    use crate::whale::WhaleInfo;
 
     fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
         query_balance(deps, address.into()).unwrap().balance
@@ -801,12 +826,28 @@ mod tests {
         _do_instantiate(deps, addr, amount, None)
     }
 
-    fn do_instantiate_with_tax_on_transfer(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+    fn do_instantiate_with_tax_on_transfer(
+        deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
         _do_instantiate_with_tax_on_transfer(deps, addr, amount)
     }
 
-    fn do_instantiate_with_tax_on_send(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+    fn do_instantiate_with_tax_on_send(
+        deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
         _do_instantiate_with_tax_on_send(deps, addr, amount)
+    }
+
+    fn do_instantiate_with_whale_info(
+        deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
+        _do_instantiate_with_whale_info(deps, addr, amount)
     }
 
     // this will set up the instantiation for other tests
@@ -827,6 +868,7 @@ mod tests {
             mint: mint.clone(),
             marketing: None,
             tax_map: None,
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -855,27 +897,30 @@ mod tests {
         addr: &str,
         amount: Uint128,
     ) -> TokenInfoResponse {
-
         // simple flat p2p tax
-        let tax_map_in = Some(TaxMap{
+        let tax_map_in = Some(TaxMap {
             on_transfer: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_send_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_transfer_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             admin: Addr::unchecked(""),
@@ -892,6 +937,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: tax_map_in,
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -917,27 +963,30 @@ mod tests {
         addr: &str,
         amount: Uint128,
     ) -> TokenInfoResponse {
-
         // simple flat p2p tax
-        let tax_map_in = Some(TaxMap{
+        let tax_map_in = Some(TaxMap {
             on_transfer: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_send: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_transfer_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             admin: Addr::unchecked(""),
@@ -954,6 +1003,50 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: tax_map_in,
+            whale_info: None,
+        };
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        let meta = query_token_info(deps.as_ref()).unwrap();
+        assert_eq!(
+            meta,
+            TokenInfoResponse {
+                name: "Auto Gen".to_string(),
+                symbol: "AUTO".to_string(),
+                decimals: 3,
+                total_supply: amount,
+            }
+        );
+        assert_eq!(get_balance(deps.as_ref(), addr), amount);
+        meta
+    }
+
+    fn _do_instantiate_with_whale_info(
+        mut deps: DepsMut,
+        addr: &str,
+        amount: Uint128,
+    ) -> TokenInfoResponse {
+        let whale_info_in = Some(WhaleInfo {
+            threshold: Decimal::percent(25), // threshold one third of supply
+            whitelist: [Addr::unchecked("whale1"), Addr::unchecked("whale2")].to_vec(),
+            admin: Addr::unchecked("whale_admin"),
+        });
+
+        let instantiate_msg = InstantiateMsg {
+            name: "Auto Gen".to_string(),
+            symbol: "AUTO".to_string(),
+            decimals: 3,
+            initial_balances: vec![Cw20Coin {
+                address: addr.to_string(),
+                amount,
+            }],
+            mint: None,
+            marketing: None,
+            tax_map: None,
+            whale_info: whale_info_in,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -994,6 +1087,7 @@ mod tests {
                 mint: None,
                 marketing: None,
                 tax_map: None,
+                whale_info: None,
             };
             let info = mock_info("creator", &[]);
             let env = mock_env();
@@ -1035,6 +1129,7 @@ mod tests {
                 }),
                 marketing: None,
                 tax_map: None,
+                whale_info: None,
             };
             let info = mock_info("creator", &[]);
             let env = mock_env();
@@ -1083,6 +1178,7 @@ mod tests {
                 }),
                 marketing: None,
                 tax_map: None,
+                whale_info: None,
             };
             let info = mock_info("creator", &[]);
             let env = mock_env();
@@ -1112,6 +1208,7 @@ mod tests {
                         logo: Some(Logo::Url("url".to_owned())),
                     }),
                     tax_map: None,
+                    whale_info: None,
                 };
 
                 let info = mock_info("creator", &[]);
@@ -1152,6 +1249,7 @@ mod tests {
                         logo: Some(Logo::Url("url".to_owned())),
                     }),
                     tax_map: None,
+                    whale_info: None,
                 };
 
                 let info = mock_info("creator", &[]);
@@ -1366,7 +1464,8 @@ mod tests {
             ],
             mint: None,
             marketing: None,
-            tax_map: None, 
+            tax_map: None,
+            whale_info: None,
         };
         let err =
             instantiate(deps.as_mut(), env.clone(), info.clone(), instantiate_msg).unwrap_err();
@@ -1390,6 +1489,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: None,
+            whale_info: None,
         };
         let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
@@ -1444,25 +1544,33 @@ mod tests {
     }
 
     fn mock_valid_tax_map(admin: String) -> TaxMap {
-        TaxMap{
+        TaxMap {
             on_transfer: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_transfer_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             admin: Addr::unchecked(admin),
@@ -1470,25 +1578,33 @@ mod tests {
     }
 
     fn mock_invalid_tax_map(admin: String) -> TaxMap {
-        TaxMap{
+        TaxMap {
             on_transfer: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(110)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(110),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(110),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send: TaxInfo {
-                src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
-                dst_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(10)}),
+                src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
+                dst_cond: TaxCondition::Always(TaxAlwaysCondition {
+                    tax_rate: Decimal::percent(10),
+                }),
                 proceeds: Addr::unchecked(String::from("proceeds")),
             },
             on_send_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             on_transfer_from: TaxInfo {
-                src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                 proceeds: Addr::unchecked(""),
             },
             admin: Addr::unchecked(admin),
@@ -1513,6 +1629,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1538,6 +1655,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1572,6 +1690,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1606,6 +1725,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_valid),
+            whale_info: None,
         };
         let env = mock_env();
         let info = mock_info("creator", &[]);
@@ -1639,6 +1759,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1666,6 +1787,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1673,13 +1795,10 @@ mod tests {
         assert_eq!(res.is_ok(), true);
 
         let info = mock_info("admin", &[]);
-        let msg = ExecuteMsg::SetTaxMap {
-            tax_map: None,
-        };
+        let msg = ExecuteMsg::SetTaxMap { tax_map: None };
         let res = execute(deps.as_mut(), env.clone(), info, msg);
         assert_eq!(res.is_ok(), true);
         assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), expected_tax_map);
-
     }
 
     #[test]
@@ -1702,6 +1821,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1735,6 +1855,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in.clone()),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1770,6 +1891,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: Some(tax_map_in),
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -1777,9 +1899,7 @@ mod tests {
         assert_eq!(res.is_ok(), true);
 
         let info = mock_info("admin", &[]);
-        let msg = ExecuteMsg::SetTaxAdmin {
-            tax_admin: None,
-        };
+        let msg = ExecuteMsg::SetTaxAdmin { tax_admin: None };
         let res = execute(deps.as_mut(), env.clone(), info, msg);
         assert_eq!(res.is_ok(), true);
         assert_eq!(TAX_INFO.load(&deps.storage).unwrap(), expected_tax_map);
@@ -1858,7 +1978,7 @@ mod tests {
             recipient: String::from("proceeds"),
             amount: expected_tax.clone(),
         };
-        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm( WasmMsg::Execute {
+        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: String::from("cosmos2contract"),
             msg: to_json_binary(&expected_tfer_msg).unwrap(),
             funds: vec![],
@@ -1876,27 +1996,103 @@ mod tests {
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
         assert_eq!(res.messages.len(), 1); //expecting proceeds message
         assert_eq!(res.messages[0].clone().msg, expected_proceeds_msg);
-        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(
+            get_balance(deps.as_ref(), addr1.clone()),
+            expected_remainder
+        );
         assert_eq!(get_balance(deps.as_ref(), addr2.clone()), expected_net);
         assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), expected_tax);
         assert_eq!(
             query_token_info(deps.as_ref()).unwrap().total_supply,
             amount1
         );
+    }
 
-        // test proceedings of tax were successful
-        let proceeds_info = mock_info("cosmos2contract", &[]);
-        let tax_res = execute(deps.as_mut(), env.clone(), proceeds_info, expected_tfer_msg).unwrap();
-        assert_eq!(tax_res.messages.len(), 0); //expecting no furhter messages
-        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
-        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), expected_net);
-        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), Uint128::zero());
-        assert_eq!(get_balance(deps.as_ref(), "proceeds"), expected_tax);
-        assert_eq!(
-            query_token_info(deps.as_ref()).unwrap().total_supply,
-            amount1
-        );
+    #[test]
+    fn transfer_successive_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let valid_transfer_amount = Uint128::from(100_000u128);
+        let invalid_transfer_amount = Uint128::from(300_000u128);
 
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> addr2 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: addr2.clone(),
+            amount: valid_transfer_amount,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(res.messages.len(), 0); //expecting proceeds message
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount);
+
+        // addr1 -> addr2 successive transfer not hitting whale limit -> valid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(res.messages.len(), 0);
+        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount.checked_mul(Uint128::from(2u64)).unwrap());
+
+        // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
+        assert!(res.is_err());
+        
+    }
+
+    #[test]
+    fn transfer_single_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let invalid_transfer_amount = Uint128::from(300_000u128);
+
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> addr2 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: addr2.clone(),
+            amount: invalid_transfer_amount,
+        };
+
+        // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
+        assert!(res.is_err());
+        
+    }
+
+    #[test]
+    fn transfer_single_to_allowed_whale_with_whale_info() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
+        let whale1 = String::from("whale1");
+        let whale2 = String::from("whale2");
+        let supply = Uint128::from(1_000_000u64);
+        let invalid_transfer_amount = Uint128::from(300_000u64);
+
+        do_instantiate_with_whale_info(deps.as_mut(), &addr1, supply);
+
+        // addr1 -> whale1 not hitting whale limit -> valid
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: whale1.clone(),
+            amount: invalid_transfer_amount,
+        };
+
+        // addr1 -> addr2 successive transfer now hitting whale limit but allowed -> valid
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+        assert_eq!(get_balance(deps.as_ref(), whale1.clone()), invalid_transfer_amount);
+        
     }
 
     #[test]
@@ -2035,7 +2231,7 @@ mod tests {
             amount: expected_tax.clone(),
         };
         let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
-        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm( WasmMsg::Execute {
+        let expected_proceeds_msg: CosmosMsg<Empty> = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: String::from("cosmos2contract"),
             msg: to_json_binary(&expected_tfer_msg).unwrap(),
             funds: vec![],
@@ -2075,7 +2271,10 @@ mod tests {
 
         // ensure balance and tax is properly transferred
         assert_eq!(res.messages[1].clone().msg, expected_proceeds_msg);
-        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(
+            get_balance(deps.as_ref(), addr1.clone()),
+            expected_remainder
+        );
         assert_eq!(get_balance(deps.as_ref(), contract.clone()), expected_net);
         assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), expected_tax);
         assert_eq!(
@@ -2085,24 +2284,30 @@ mod tests {
 
         // test proceedings of tax were successful
         let proceeds_info = mock_info("cosmos2contract", &[]);
-        let tax_res = execute(deps.as_mut(), env.clone(), proceeds_info, expected_tfer_msg).unwrap();
+        let tax_res =
+            execute(deps.as_mut(), env.clone(), proceeds_info, expected_tfer_msg).unwrap();
         assert_eq!(tax_res.messages.len(), 0); //expecting no furhter messages
-        assert_eq!(get_balance(deps.as_ref(), addr1.clone()), expected_remainder);
+        assert_eq!(
+            get_balance(deps.as_ref(), addr1.clone()),
+            expected_remainder
+        );
         assert_eq!(get_balance(deps.as_ref(), contract.clone()), expected_net);
-        assert_eq!(get_balance(deps.as_ref(), "cosmos2contract"), Uint128::zero());
+        assert_eq!(
+            get_balance(deps.as_ref(), "cosmos2contract"),
+            Uint128::zero()
+        );
         assert_eq!(get_balance(deps.as_ref(), "proceeds"), expected_tax);
         assert_eq!(
             query_token_info(deps.as_ref()).unwrap().total_supply,
             amount1
         );
-
     }
 
     mod migration {
         use self::state::migrate_v1::tests::mock_dependencies_with_terraport_balances;
         use super::*;
 
-        use cosmwasm_std::{Empty, Decimal};
+        use cosmwasm_std::{Decimal, Empty};
         use cw20::{AllAllowancesResponse, AllSpenderAllowancesResponse, SpenderAllowanceInfo};
         use cw_multi_test::{App, Contract, ContractWrapper, Executor};
 
@@ -2136,6 +2341,7 @@ mod tests {
                         mint: None,
                         marketing: None,
                         tax_map: None,
+                        whale_info: None,
                     },
                     &[],
                     "TOKEN",
@@ -2225,47 +2431,45 @@ mod tests {
                 (Addr::unchecked("addr1"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr2"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr3"), Uint128::new(4455), 123),
-
                 // mock a transfer at later height
                 (Addr::unchecked("addr1"), Uint128::new(1233), 456),
                 (Addr::unchecked("addr2"), Uint128::new(1235), 456),
             ]);
-            
+
             let env = mock_env();
             crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: None }).unwrap();
 
             // balances are ok
-            match query_balance(deps.as_ref(), "addr1".to_string()){
+            match query_balance(deps.as_ref(), "addr1".to_string()) {
                 Ok(balance) => {
                     assert_eq!(
                         balance,
-                        BalanceResponse{
+                        BalanceResponse {
                             balance: Uint128::new(1233),
                         }
                     )
-                },
+                }
                 Err(e) => panic!("Error querying balance: {:?}", e),
             }
-            match query_balance(deps.as_ref(), "addr2".to_string()){
+            match query_balance(deps.as_ref(), "addr2".to_string()) {
                 Ok(balance) => {
                     assert_eq!(
                         balance,
-                        BalanceResponse{
+                        BalanceResponse {
                             balance: Uint128::new(1235),
                         }
                     )
-                },
+                }
                 Err(e) => panic!("Error querying balance: {:?}", e),
             }
 
             // tax map is set
             match TAX_INFO.load(deps.as_ref().storage) {
                 Ok(tax_info) => {
-                    assert_eq!(tax_info, TaxMap::default() )
-                },
+                    assert_eq!(tax_info, TaxMap::default())
+                }
                 Err(_) => panic!("Expected Tax map to be available!"),
             }
-            
         }
 
         #[test]
@@ -2275,71 +2479,77 @@ mod tests {
                 (Addr::unchecked("addr1"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr2"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr3"), Uint128::new(4455), 123),
-
                 // mock a transfer at later height
                 (Addr::unchecked("addr1"), Uint128::new(1233), 456),
                 (Addr::unchecked("addr2"), Uint128::new(1235), 456),
             ]);
             let tax = TaxMap {
                 admin: Addr::unchecked("admin"),
-                on_transfer: TaxInfo{
-                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                on_transfer: TaxInfo {
+                    src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                     proceeds: Addr::unchecked("proceeds1"),
                 },
                 on_transfer_from: TaxInfo {
-                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                     proceeds: Addr::unchecked("proceeds2"),
                 },
                 on_send: TaxInfo {
-                    src_cond: TaxCondition::Never(TaxNeverCondition{}),
-                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                    src_cond: TaxCondition::Never(TaxNeverCondition {}),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                     proceeds: Addr::unchecked("proceeds3"),
-                
                 },
-                on_send_from: TaxInfo{
-                    src_cond: TaxCondition::Always(TaxAlwaysCondition{tax_rate: Decimal::percent(1)}),
-                    dst_cond: TaxCondition::Never(TaxNeverCondition{}),
+                on_send_from: TaxInfo {
+                    src_cond: TaxCondition::Always(TaxAlwaysCondition {
+                        tax_rate: Decimal::percent(1),
+                    }),
+                    dst_cond: TaxCondition::Never(TaxNeverCondition {}),
                     proceeds: Addr::unchecked("proceeds4"),
-                }
+                },
             };
-            
+
             let env = mock_env();
-            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: Some(tax.clone()) }).unwrap();
+            crate::contract::migrate(
+                deps.as_mut(),
+                env,
+                MigrateMsg {
+                    tax_map: Some(tax.clone()),
+                },
+            )
+            .unwrap();
 
             // balances are ok
-            match query_balance(deps.as_ref(), "addr1".to_string()){
+            match query_balance(deps.as_ref(), "addr1".to_string()) {
                 Ok(balance) => {
                     assert_eq!(
                         balance,
-                        BalanceResponse{
+                        BalanceResponse {
                             balance: Uint128::new(1233),
                         }
                     )
-                },
+                }
                 Err(e) => panic!("Error querying balance: {:?}", e),
             }
-            match query_balance(deps.as_ref(), "addr2".to_string()){
+            match query_balance(deps.as_ref(), "addr2".to_string()) {
                 Ok(balance) => {
                     assert_eq!(
                         balance,
-                        BalanceResponse{
+                        BalanceResponse {
                             balance: Uint128::new(1235),
                         }
                     )
-                },
+                }
                 Err(e) => panic!("Error querying balance: {:?}", e),
             }
 
             // tax map is set
             match TAX_INFO.load(deps.as_ref().storage) {
                 Ok(tax_info) => {
-                    assert_eq!(tax_info, tax )
-                },
+                    assert_eq!(tax_info, tax)
+                }
                 Err(_) => panic!("Expected Tax map to be available!"),
             }
-            
         }
     }
 
@@ -2362,6 +2572,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2416,6 +2627,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2469,6 +2681,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2522,6 +2735,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2575,6 +2789,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2628,6 +2843,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2681,6 +2897,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2737,6 +2954,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2790,6 +3008,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2839,6 +3058,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2890,6 +3110,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2942,6 +3163,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -2992,6 +3214,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -3049,6 +3272,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);
@@ -3099,6 +3323,7 @@ mod tests {
                     logo: Some(Logo::Url("url".to_owned())),
                 }),
                 tax_map: None,
+                whale_info: None,
             };
 
             let info = mock_info("creator", &[]);

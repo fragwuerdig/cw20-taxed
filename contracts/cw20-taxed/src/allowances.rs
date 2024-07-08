@@ -350,6 +350,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: None, 
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -399,6 +400,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: tax_map_in,
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -461,6 +463,7 @@ mod tests {
             mint: None,
             marketing: None,
             tax_map: tax_map_in,
+            whale_info: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
