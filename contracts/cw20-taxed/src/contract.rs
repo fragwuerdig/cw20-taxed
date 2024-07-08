@@ -754,11 +754,14 @@ pub fn query_download_logo(deps: Deps) -> StdResult<DownloadLogoResponse> {
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-    // merge upgrade paths
-    // crates.io:terraport-token 0.0.0 -> crates.io:cw20-base 1.1.0
-    // crates.io:cw20-base 1.1.0 -> crates.io:cw20-base 1.1.0
+    // we support upgrading from
+    // terraport tokens
+    // terraswap tokens
+    // cw20-base 1.0.1 (FRG token)
     state::migrate_v1::ensure_known_upgrade_path(deps.storage)?;
 
+    // after merging upgrade paths and normalize to cw-base 1.1.0
+    // check normal upgrade flow
     let original_version =
         ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -772,7 +775,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
         }
     }
 
-    if original_version < "1.1.0+taxed001".parse::<semver::Version>().unwrap() {
+    if original_version < "1.1.0+taxed002".parse::<semver::Version>().unwrap() {
         match TAX_INFO.load(deps.storage) {
             // there seems to be an existing tax map, so we don't need to do anything
             Ok(_) => {}
@@ -785,6 +788,24 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
                     None => TaxMap::default(),
                 };
                 TAX_INFO.save(deps.storage, &tax_map)?;
+            }
+        }
+        match ANTI_WHALE_INFO.load(deps.storage) {
+            // there seems to be an existing whale info, so we don't need to do anything
+            Ok(_) => {}
+
+            // no whale info, so we need to add one
+            Err(_) => {
+                // Add whale info
+                let whale_info = match msg.whale_info {
+                    Some(x) => x,
+                    None => WhaleInfo {
+                        threshold: Decimal::percent(100),
+                        whitelist: vec![],
+                        admin: Addr::unchecked(""),
+                    },
+                };
+                ANTI_WHALE_INFO.save(deps.storage, &whale_info)?;
             }
         }
     }
@@ -2479,7 +2500,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: cw20_addr.to_string(),
                     new_code_id: cw20_id,
-                    msg: to_json_binary(&MigrateMsg { tax_map: None }).unwrap(),
+                    msg: to_json_binary(&MigrateMsg { tax_map: None, whale_info: None }).unwrap(),
                 }),
             )
             .unwrap();
@@ -2532,7 +2553,7 @@ mod tests {
             ]);
 
             let env = mock_env();
-            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: None }).unwrap();
+            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: None, whale_info: None }).unwrap();
 
             // balances are ok
             match query_balance(deps.as_ref(), "addr1".to_string()) {
@@ -2610,6 +2631,7 @@ mod tests {
                 env,
                 MigrateMsg {
                     tax_map: Some(tax.clone()),
+                    whale_info: None,
                 },
             )
             .unwrap();

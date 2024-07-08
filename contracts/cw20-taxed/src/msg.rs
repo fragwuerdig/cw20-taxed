@@ -140,6 +140,7 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct MigrateMsg {
     pub tax_map: Option<TaxMap>,
+    pub whale_info: Option<WhaleInfo>,
 }
 
 #[cw_serde]
