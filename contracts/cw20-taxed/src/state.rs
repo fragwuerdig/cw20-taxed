@@ -17,6 +17,15 @@ pub struct TokenInfo {
 }
 
 #[cw_serde]
+// Subset of the token info that makes sense
+// to change after instantiation
+pub struct MigrateTokenInfo {
+    pub name: String,
+    pub symbol: String,
+    pub mint: Option<MinterData>,
+}
+
+#[cw_serde]
 pub struct MinterData {
     pub minter: Addr,
     /// cap is how many more tokens can be issued by the minter
@@ -43,7 +52,6 @@ pub const TAX_INFO: Item<TaxMap> = Item::new("tax_info");
 
 // anti whale measures
 pub const ANTI_WHALE_INFO: Item<WhaleInfo> = Item::new("whale_info");
-
 
 // specific only for migration from Terraport Tokens
 pub mod migrate_v1 {
@@ -82,9 +90,8 @@ pub mod migrate_v1 {
 
     pub fn is_cw20_taxed_v0(store: &dyn Storage) -> StdResult<bool> {
         let version = get_contract_version(store)?;
-        let this_version = Version::from_str(
-            version.version.as_str(),
-        ).map_err(|_| StdError::generic_err("no valid version in store"))?;
+        let this_version = Version::from_str(version.version.as_str())
+            .map_err(|_| StdError::generic_err("no valid version in store"))?;
         let expect_v0 = Version::from_str("1.1.0")
             .map_err(|_| StdError::generic_err("could not parse version 1.0.0"))?;
         Ok(version.contract == CONTRACT_NAME && expect_v0 <= this_version)
@@ -108,33 +115,56 @@ pub mod migrate_v1 {
         // this is for first revision of taxed - no normalization needed
         } else if is_cw20_taxed_v0(store)? {
             return Ok(());
-        
+
         // this is for FRG tokens - normalize to v1.1.0
         } else if is_cw_base_1_0_1(store)? {
             set_contract_version(store, CONTRACT_NAME, "1.1.0")?;
             return Ok(());
-        
+
         // no known migration path -play safe and throw
         } else {
-            return Err(StdError::generic_err("This is not a knowledable migration path"));
+            return Err(StdError::generic_err(
+                "This is not a knowledable migration path",
+            ));
         }
     }
 
     #[cfg(test)]
     pub mod tests {
         use super::*;
-        use cosmwasm_std::{testing::{mock_dependencies, MockApi, MockQuerier, MockStorage}, OwnedDeps};
+        use cosmwasm_std::{
+            testing::{mock_dependencies, MockApi, MockQuerier, MockStorage},
+            OwnedDeps,
+        };
         use cw2::set_contract_version;
+        use cw20_base::state::{TokenInfo, TOKEN_INFO};
 
         // mock a terraport style store
         pub fn mock_dependencies_with_terraport_balances(
-            balances: Vec<(Addr, Uint128, u64)>
+            balances: Vec<(Addr, Uint128, u64)>,
         ) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
             let mut deps = mock_dependencies();
             set_contract_version(&mut deps.storage, "crates.io:terraport-token", "0.0.0").unwrap();
+            let mut latest_height = 0;
             for (addr, balance, height) in balances {
-                BALANCES.save(&mut deps.storage, &addr, &balance, height).unwrap();
+                BALANCES
+                    .save(&mut deps.storage, &addr, &balance, height)
+                    .unwrap();
             }
+            let total_supply: Uint128 = BALANCES
+                .range(&mut deps.storage, None, None, cosmwasm_std::Order::Descending)
+                .map(|res| -> Uint128 {
+                    let unwrapped_res = res.unwrap_or((Addr::unchecked(""), Uint128::zero()));
+                    return unwrapped_res.1;
+                })
+                .sum();
+            TOKEN_INFO.save(&mut deps.storage, &TokenInfo {
+                name: "terraport".to_string(),
+                symbol: "TPT".to_string(),
+                decimals: 6,
+                total_supply: total_supply,
+                mint: None,
+            }).unwrap();
             deps
         }
 
@@ -170,7 +200,7 @@ pub mod migrate_v1 {
         }
 
         #[test]
-        fn test_is_terraswap_token_v0(){
+        fn test_is_terraswap_token_v0() {
             let mut store = MockStorage::new();
 
             set_contract_version(&mut store, "crates.io:cw20-base", "1.0.6").unwrap();
@@ -193,17 +223,30 @@ pub mod migrate_v1 {
                 (Addr::unchecked("addr1"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr2"), Uint128::new(1234), 123),
                 (Addr::unchecked("addr3"), Uint128::new(4455), 123),
-
                 // mock a transfer at later height
                 (Addr::unchecked("addr1"), Uint128::new(1233), 456),
                 (Addr::unchecked("addr2"), Uint128::new(1235), 456),
             ]);
 
             // ensure the new data is compatible
-            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr1")).unwrap(), Uint128::new(1233));
-            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr2")).unwrap(), Uint128::new(1235));
-            assert_eq!(super::BALANCES.load(&deps.storage, &Addr::unchecked("addr3")).unwrap(), Uint128::new(4455));
+            assert_eq!(
+                super::BALANCES
+                    .load(&deps.storage, &Addr::unchecked("addr1"))
+                    .unwrap(),
+                Uint128::new(1233)
+            );
+            assert_eq!(
+                super::BALANCES
+                    .load(&deps.storage, &Addr::unchecked("addr2"))
+                    .unwrap(),
+                Uint128::new(1235)
+            );
+            assert_eq!(
+                super::BALANCES
+                    .load(&deps.storage, &Addr::unchecked("addr3"))
+                    .unwrap(),
+                Uint128::new(4455)
+            );
         }
     }
-
 }

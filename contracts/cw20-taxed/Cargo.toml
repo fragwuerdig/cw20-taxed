@@ -1,6 +1,6 @@
 [package]
 name = "cw20-taxed"
-version = "1.1.0+taxed002"
+version = "1.1.0+taxed003"
 authors = ["Till Ziegler <tz@schoeneweide.tk>"]
 edition = "2021"
 description = "Basic implementation of a CosmWasm-20 compliant token with blacklist tax"

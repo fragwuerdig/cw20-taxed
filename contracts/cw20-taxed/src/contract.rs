@@ -4,7 +4,8 @@ use std::f32::consts::E;
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg
+    to_json_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty, Env, MessageInfo,
+    Response, StdError, StdResult, Uint128, WasmMsg,
 };
 
 use cw2::{ensure_from_older_version, set_contract_version};
@@ -174,7 +175,6 @@ pub fn instantiate(
             threshold: Decimal::percent(100),
             whitelist: vec![],
             admin: Addr::unchecked(info.sender.clone()),
-        
         },
     };
 
@@ -809,6 +809,18 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             }
         }
     }
+
+    match msg.new_info {
+        Some(new_info) => {
+            let mut old_info = TOKEN_INFO.load(deps.storage)?;
+            old_info.name = new_info.name;
+            old_info.symbol = new_info.symbol;
+            old_info.mint = new_info.mint;
+            TOKEN_INFO.save(deps.storage, &old_info)?;
+        }
+        None => (),
+    }
+
     Ok(Response::default())
 }
 
@@ -817,7 +829,9 @@ mod tests {
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
-    use cosmwasm_std::{coins, from_json, to_binary, Addr, CosmosMsg, Decimal, StdError, SubMsg, WasmMsg};
+    use cosmwasm_std::{
+        coins, from_json, to_binary, Addr, CosmosMsg, Decimal, StdError, SubMsg, WasmMsg,
+    };
 
     use super::*;
     use crate::msg::InstantiateMarketingInfo;
@@ -2056,17 +2070,24 @@ mod tests {
         };
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
         assert_eq!(res.messages.len(), 0); //expecting proceeds message
-        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount);
+        assert_eq!(
+            get_balance(deps.as_ref(), addr2.clone()),
+            valid_transfer_amount
+        );
 
         // addr1 -> addr2 successive transfer not hitting whale limit -> valid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
         assert_eq!(res.messages.len(), 0);
-        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount.checked_mul(Uint128::from(2u64)).unwrap());
+        assert_eq!(
+            get_balance(deps.as_ref(), addr2.clone()),
+            valid_transfer_amount
+                .checked_mul(Uint128::from(2u64))
+                .unwrap()
+        );
 
         // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert!(res.is_err());
-        
     }
 
     #[test]
@@ -2092,7 +2113,6 @@ mod tests {
         // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert!(res.is_err());
-        
     }
 
     #[test]
@@ -2117,8 +2137,10 @@ mod tests {
 
         // addr1 -> addr2 successive transfer now hitting whale limit but allowed -> valid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
-        assert_eq!(get_balance(deps.as_ref(), whale1.clone()), invalid_transfer_amount);
-        
+        assert_eq!(
+            get_balance(deps.as_ref(), whale1.clone()),
+            invalid_transfer_amount
+        );
     }
 
     #[test]
@@ -2144,17 +2166,24 @@ mod tests {
         };
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
         assert_eq!(res.messages.len(), 1); //expecting proceeds message
-        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount);
+        assert_eq!(
+            get_balance(deps.as_ref(), addr2.clone()),
+            valid_transfer_amount
+        );
 
         // addr1 -> addr2 successive transfer not hitting whale limit -> valid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
         assert_eq!(res.messages.len(), 1);
-        assert_eq!(get_balance(deps.as_ref(), addr2.clone()), valid_transfer_amount.checked_mul(Uint128::from(2u64)).unwrap());
+        assert_eq!(
+            get_balance(deps.as_ref(), addr2.clone()),
+            valid_transfer_amount
+                .checked_mul(Uint128::from(2u64))
+                .unwrap()
+        );
 
         // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert!(res.is_err());
-        
     }
 
     #[test]
@@ -2181,7 +2210,6 @@ mod tests {
         // addr1 -> addr2 successive transfer now hitting whale limit -> invalid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert!(res.is_err());
-        
     }
 
     #[test]
@@ -2207,8 +2235,10 @@ mod tests {
 
         // addr1 -> addr2 successive transfer now hitting whale limit but allowed -> valid
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
-        assert_eq!(get_balance(deps.as_ref(), whale1.clone()), invalid_transfer_amount);
-        
+        assert_eq!(
+            get_balance(deps.as_ref(), whale1.clone()),
+            invalid_transfer_amount
+        );
     }
 
     #[test]
@@ -2426,6 +2456,7 @@ mod tests {
         use cosmwasm_std::{Decimal, Empty};
         use cw20::{AllAllowancesResponse, AllSpenderAllowancesResponse, SpenderAllowanceInfo};
         use cw_multi_test::{App, Contract, ContractWrapper, Executor};
+        use state::MigrateTokenInfo;
 
         fn cw20_contract() -> Box<dyn Contract<Empty>> {
             let contract = ContractWrapper::new(
@@ -2500,7 +2531,12 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: cw20_addr.to_string(),
                     new_code_id: cw20_id,
-                    msg: to_json_binary(&MigrateMsg { tax_map: None, whale_info: None }).unwrap(),
+                    msg: to_json_binary(&MigrateMsg {
+                        tax_map: None,
+                        whale_info: None,
+                        new_info: None,
+                    })
+                    .unwrap(),
                 }),
             )
             .unwrap();
@@ -2553,7 +2589,16 @@ mod tests {
             ]);
 
             let env = mock_env();
-            crate::contract::migrate(deps.as_mut(), env, MigrateMsg { tax_map: None, whale_info: None }).unwrap();
+            crate::contract::migrate(
+                deps.as_mut(),
+                env,
+                MigrateMsg {
+                    tax_map: None,
+                    whale_info: None,
+                    new_info: None,
+                },
+            )
+            .unwrap();
 
             // balances are ok
             match query_balance(deps.as_ref(), "addr1".to_string()) {
@@ -2632,6 +2677,7 @@ mod tests {
                 MigrateMsg {
                     tax_map: Some(tax.clone()),
                     whale_info: None,
+                    new_info: None,
                 },
             )
             .unwrap();
@@ -2666,6 +2712,80 @@ mod tests {
                     assert_eq!(tax_info, tax)
                 }
                 Err(_) => panic!("Expected Tax map to be available!"),
+            }
+        }
+
+        #[test]
+        fn test_migrate_from_terraport_with_new_token_info() {
+            let mut deps = mock_dependencies_with_terraport_balances(vec![
+                // initial balances
+                (Addr::unchecked("addr1"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr2"), Uint128::new(1234), 123),
+                (Addr::unchecked("addr3"), Uint128::new(4455), 123),
+                // mock a transfer at later height
+                (Addr::unchecked("addr1"), Uint128::new(1233), 456),
+                (Addr::unchecked("addr2"), Uint128::new(1235), 456),
+            ]);
+
+            let new_info = MigrateTokenInfo {
+                name: "New Token".to_string(),
+                symbol: "NEW".to_string(),
+                mint: Some(MinterData {
+                    minter: Addr::unchecked("minter"),
+                    cap: Some(Uint128::from(10000u32)),
+                }),
+            };
+
+            let expected_token_info = TokenInfo {
+                name: new_info.name.clone(),
+                symbol: new_info.symbol.clone(),
+                mint: new_info.mint.clone(),
+                decimals: 6,
+                total_supply: Uint128::new(6923),
+            };
+
+            let env = mock_env();
+            crate::contract::migrate(
+                deps.as_mut(),
+                env,
+                MigrateMsg {
+                    tax_map: None,
+                    whale_info: None,
+                    new_info: Some(new_info),
+                },
+            )
+            .unwrap();
+
+            // balances are ok
+            match query_balance(deps.as_ref(), "addr1".to_string()) {
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse {
+                            balance: Uint128::new(1233),
+                        }
+                    )
+                }
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+            match query_balance(deps.as_ref(), "addr2".to_string()) {
+                Ok(balance) => {
+                    assert_eq!(
+                        balance,
+                        BalanceResponse {
+                            balance: Uint128::new(1235),
+                        }
+                    )
+                }
+                Err(e) => panic!("Error querying balance: {:?}", e),
+            }
+
+            // new info is set
+            match TOKEN_INFO.load(deps.as_ref().storage) {
+                Ok(new_info) => {
+                    assert_eq!(new_info, expected_token_info)
+                }
+                Err(_) => panic!("Expected Token Info to be available!"),
             }
         }
     }

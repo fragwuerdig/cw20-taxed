@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::state::TOKEN_INFO;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct WhaleInfo  {
+pub struct WhaleInfo {
     // percent of total supply that can be acquired by a single address
     pub threshold: Decimal,
 

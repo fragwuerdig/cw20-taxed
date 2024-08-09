@@ -1,3 +1,4 @@
+use crate::state::{MigrateTokenInfo, TokenInfo};
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
 use cw20::{Cw20Coin, Expiration, Logo, MinterResponse};
@@ -27,9 +28,7 @@ pub struct InstantiateMsg {
     pub whale_info: Option<WhaleInfo>,
 }
 
-pub struct InstantiateTaxMap {
-
-}
+pub struct InstantiateTaxMap {}
 
 impl InstantiateMsg {
     pub fn get_cap(&self) -> Option<Uint128> {
@@ -141,14 +140,20 @@ pub enum QueryMsg {
 pub struct MigrateMsg {
     pub tax_map: Option<TaxMap>,
     pub whale_info: Option<WhaleInfo>,
+    pub new_info: Option<MigrateTokenInfo>,
 }
 
 #[cw_serde]
 pub enum Cw20TaxedExecuteMsg {
     /// Transfer is a base message to move tokens to another account without triggering actions
-    Transfer { recipient: String, amount: Uint128 },
+    Transfer {
+        recipient: String,
+        amount: Uint128,
+    },
     /// Burn is a base message to destroy tokens forever
-    Burn { amount: Uint128 },
+    Burn {
+        amount: Uint128,
+    },
     /// Send is a base message to transfer tokens to a contract and trigger an action
     /// on the receiving contract.
     Send {
@@ -188,14 +193,22 @@ pub enum Cw20TaxedExecuteMsg {
         msg: Binary,
     },
     /// Only with "approval" extension. Destroys tokens forever
-    BurnFrom { owner: String, amount: Uint128 },
+    BurnFrom {
+        owner: String,
+        amount: Uint128,
+    },
     /// Only with the "mintable" extension. If authorized, creates amount new tokens
     /// and adds to the recipient balance.
-    Mint { recipient: String, amount: Uint128 },
+    Mint {
+        recipient: String,
+        amount: Uint128,
+    },
     /// Only with the "mintable" extension. The current minter may set
     /// a new minter. Setting the minter to None will remove the
     /// token's minter forever.
-    UpdateMinter { new_minter: Option<String> },
+    UpdateMinter {
+        new_minter: Option<String>,
+    },
     /// Only with the "marketing" extension. If authorized, updates marketing metadata.
     /// Setting None/null for any of these will leave it unchanged.
     /// Setting Some("") will clear this field on the contract storage
@@ -211,12 +224,20 @@ pub enum Cw20TaxedExecuteMsg {
     UploadLogo(Logo),
 
     /// Tax extension related
-    SetTaxMap { tax_map: Option<TaxMap> },      // empty resets tax map to default
-    SetTaxAdmin { tax_admin: Option<String> },  // empty resets tax_admin to ""
+    SetTaxMap {
+        tax_map: Option<TaxMap>,
+    }, // empty resets tax map to default
+    SetTaxAdmin {
+        tax_admin: Option<String>,
+    }, // empty resets tax_admin to ""
 
     /// Whale extension related
-    SetWhaleInfo { whale_info: Option<WhaleInfo> }, // empty resets whale_info to default
-    SetWhaleAdmin { whale_admin: Option<String> }, // empty resets whale_admin to ""
+    SetWhaleInfo {
+        whale_info: Option<WhaleInfo>,
+    }, // empty resets whale_info to default
+    SetWhaleAdmin {
+        whale_admin: Option<String>,
+    }, // empty resets whale_admin to ""
 }
 
 #[cfg(test)]

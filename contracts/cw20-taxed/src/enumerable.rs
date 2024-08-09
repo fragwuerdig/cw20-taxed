@@ -264,13 +264,15 @@ mod tests {
         let acct3 = String::from("nice");
         let acct4 = String::from("aaaardvark");
         let expected_order = [
-            acct4.clone(), acct1.clone(),
+            acct4.clone(),
+            acct1.clone(),
             // need contract address here because
             // the tax (even if zero is always moved
             // to the contract and therefore sets
             // non-nil state
             String::from("cosmos2contract"),
-            acct3.clone(), acct2.clone(),
+            acct3.clone(),
+            acct2.clone(),
         ];
 
         do_instantiate(deps.as_mut(), &acct1, Uint128::new(12340000));

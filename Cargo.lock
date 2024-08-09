@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "cw20-taxed"
-version = "1.1.0+taxed002"
+version = "1.1.0+taxed003"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
