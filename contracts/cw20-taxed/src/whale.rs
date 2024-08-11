@@ -54,6 +54,7 @@ impl WhaleInfo {
     }
 }
 
+#[cfg(test)]
 mod test {
     use cosmwasm_std::{testing::MockStorage, Addr, Decimal, Uint128};
 
