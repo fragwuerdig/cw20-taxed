@@ -27,7 +27,7 @@ use crate::state::{
 };
 
 use crate::tax::TaxMap;
-use crate::whale::{self, WhaleInfo};
+use crate::whale::{self, execute_set_whale_admin, execute_set_whale_info, WhaleInfo};
 
 // version info for migration info
 pub const CONTRACT_NAME: &str = "crates.io:cw20-base";
@@ -266,8 +266,21 @@ pub fn execute(
         ExecuteMsg::SetTaxAdmin { tax_admin } => execute_set_tax_admin(deps, env, info, tax_admin),
 
         // WhaleInfo related extension
-        ExecuteMsg::SetWhaleInfo { whale_info } => panic!("Not implemented"),
-        ExecuteMsg::SetWhaleAdmin { whale_admin } => panic!("Not implemented"),
+        ExecuteMsg::SetWhaleInfo { whale_info } => {
+            match whale_info {
+                Some(x) => execute_set_whale_info(deps, env, info, x),
+                None => { Ok(Response::new()) }
+            }
+        },
+        ExecuteMsg::SetWhaleAdmin { whale_admin } => {
+            match whale_admin {
+                Some(x) => {
+                    let new_addr = deps.api.addr_validate(x.as_str())?;
+                    execute_set_whale_admin(deps, env, info, new_addr)
+                }
+                None => { Ok(Response::new()) }
+            }
+        },
     }
 }
 

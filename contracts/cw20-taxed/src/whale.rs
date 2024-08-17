@@ -1,6 +1,11 @@
+use std::char::REPLACEMENT_CHARACTER;
+
+use cosmwasm_std::{DepsMut, Env, MessageInfo, Response};
 use cosmwasm_std::{Addr, Decimal, StdError, StdResult, Storage, Uint128};
+use crate::ContractError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::state::ANTI_WHALE_INFO;
 
 use crate::state::TOKEN_INFO;
 
@@ -54,9 +59,44 @@ impl WhaleInfo {
     }
 }
 
+pub fn execute_set_whale_info(
+    deps: DepsMut,
+    env: Env, info: MessageInfo,
+    whale_info: WhaleInfo
+) -> Result<Response, ContractError> {
+    let mut old_whale_info = ANTI_WHALE_INFO.load(deps.storage)?;
+    whale_info.validate()?;
+    if info.sender != old_whale_info.admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    ANTI_WHALE_INFO.save(deps.storage, &whale_info)?;
+    Ok(Response::new())
+}
+
+pub fn execute_set_whale_admin(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    admin: Addr
+) -> Result<Response, ContractError> {
+    let mut old_info = ANTI_WHALE_INFO.load(deps.storage)?;
+    if info.sender != old_info.admin {
+        return Err(ContractError::Unauthorized{});
+    }
+    old_info.admin = admin;
+    ANTI_WHALE_INFO.save(deps.storage, &old_info)?;
+    Ok(Response::new())
+}
+
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{testing::MockStorage, Addr, Decimal, Uint128};
+    use std::ops::Add;
+
+    use cosmwasm_std::{
+        testing::{mock_dependencies, mock_env, mock_info, MockStorage}, Addr, Decimal, Uint128
+    };
+    use crate::ContractError;
+    use serde::de;
 
     use crate::state::TokenInfo;
 
@@ -131,5 +171,98 @@ mod test {
         // not allowed to have more than 10% of total supply
         assert!(info.assert_no_whale(storage, &addr3, whale_amount).is_err());
         assert!(info.assert_no_whale(storage, &addr3, fish_amount).is_ok());
+    }
+
+    #[test]
+    fn test_set_whale_info_works() {
+        let mut deps = mock_dependencies();
+        let info = mock_info("admin", &[]);
+        let expected_whale_info = super::WhaleInfo {
+            threshold: Decimal::percent(10),
+            whitelist: vec![Addr::unchecked("whale1"), Addr::unchecked("whale2")],
+            admin: Addr::unchecked("admin"),
+        };
+
+        // mock info being set by instantiation
+        super::ANTI_WHALE_INFO.save(deps.as_mut().storage, &super::WhaleInfo {
+            threshold: Decimal::one(),
+            whitelist: vec![],
+            admin: Addr::unchecked("admin"),
+        }).unwrap();
+
+        super::execute_set_whale_info(deps.as_mut(), mock_env(), info, expected_whale_info).unwrap();
+
+        let new_info = super::ANTI_WHALE_INFO.load(deps.as_ref().storage).unwrap();
+        assert_eq!(new_info, new_info);
+        
+    }
+
+    #[test]
+    fn test_set_whale_info_rejects_no_admin() {
+        let mut deps = mock_dependencies();
+        let info = mock_info("no_admin", &[]);
+        let expected_whale_info = super::WhaleInfo {
+            threshold: Decimal::percent(10),
+            whitelist: vec![Addr::unchecked("whale1"), Addr::unchecked("whale2")],
+            admin: Addr::unchecked("admin"),
+        };
+
+        // mock info being set by instantiation
+        super::ANTI_WHALE_INFO.save(deps.as_mut().storage, &super::WhaleInfo {
+            threshold: Decimal::one(),
+            whitelist: vec![],
+            admin: Addr::unchecked("admin"),
+        }).unwrap();
+
+        let err = super::execute_set_whale_info(deps.as_mut(), mock_env(), info, expected_whale_info);
+        match err {
+            Ok(_) => { panic!("expected failrue"); },
+            Err(e) => {
+                assert_eq!( e, ContractError::Unauthorized {  } )
+            }
+        }
+        
+    }
+
+    #[test]
+    fn test_set_whale_admin() {
+        let mut deps = mock_dependencies();
+        let info = mock_info("admin", &[]);
+        let old_whale_info = super::WhaleInfo {
+            threshold: Decimal::percent(10),
+            whitelist: vec![Addr::unchecked("whale1"), Addr::unchecked("whale2")],
+            admin: Addr::unchecked("admin"),
+        };
+        let mut expected_whale_info = old_whale_info.clone();
+        expected_whale_info.admin = Addr::unchecked("admin2");
+
+        // mock info being set by instantiation
+        super::ANTI_WHALE_INFO.save(deps.as_mut().storage, &old_whale_info).unwrap();
+
+        super::execute_set_whale_admin(deps.as_mut(), mock_env(), info, Addr::unchecked("admin2")).unwrap();
+
+        let new_info = super::ANTI_WHALE_INFO.load(deps.as_mut().storage).unwrap();
+        assert_eq!(new_info, expected_whale_info)
+    }
+
+    #[test]
+    fn test_set_whale_admin_unauthorized() {
+        let mut deps = mock_dependencies();
+        let info = mock_info("no_admin", &[]);
+        let old_whale_info = super::WhaleInfo {
+            threshold: Decimal::percent(10),
+            whitelist: vec![Addr::unchecked("whale1"), Addr::unchecked("whale2")],
+            admin: Addr::unchecked("admin"),
+        };
+
+        // mock info being set by instantiation
+        super::ANTI_WHALE_INFO.save(deps.as_mut().storage, &old_whale_info).unwrap();
+
+        let res = super::execute_set_whale_admin(deps.as_mut(), mock_env(), info, Addr::unchecked("admin2"));
+        match res {
+            Ok(_) => {panic!("unexpected success of setting admin!")},
+            Err(e) => {assert_eq!(e, ContractError::Unauthorized {  })}
+        }
+
     }
 }
