@@ -83,6 +83,11 @@ pub mod migrate_v1 {
         Ok(version.contract == CONTRACT_NAME_TERRASWAP && version.version == "0.0.0")
     }
 
+    pub fn is_cw_base_v0(store: &dyn Storage) -> StdResult<bool> {
+        let version = get_contract_version(store)?;
+        Ok(version.contract == "crates.io:cw20-base" && version.version == "0.0.0")
+    }
+
     pub fn is_cw_base_1_0_1(store: &dyn Storage) -> StdResult<bool> {
         let version = get_contract_version(store)?;
         Ok(version.contract == "crates.io:cw20-base" && version.version == "1.0.1")
@@ -118,6 +123,11 @@ pub mod migrate_v1 {
 
         // this is for FRG tokens - normalize to v1.1.0
         } else if is_cw_base_1_0_1(store)? {
+            set_contract_version(store, CONTRACT_NAME, "1.1.0")?;
+            return Ok(());
+
+        // this is for terraswap tokens - normalize to v1.1.0
+        } else if is_cw_base_v0(store)? {
             set_contract_version(store, CONTRACT_NAME, "1.1.0")?;
             return Ok(());
 
