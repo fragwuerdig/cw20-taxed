@@ -22,7 +22,7 @@ This is a list of on-chain deployments for this contract:
 | `v1.1.0` | 8551 |
 | `v1.1.0+taxed001` | 8654 |
 | `v1.1.0+taxed003` | 9257 |
-| `v1.1.0+taxed004` | <TBD> |
+| `v1.1.0+taxed004` | 10071 |
 
 ## Instructions to Migrate from Terraport/Terraswap Tokens
 
