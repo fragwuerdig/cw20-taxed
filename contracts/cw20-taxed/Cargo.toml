@@ -7,6 +7,11 @@ description = "Basic implementation of a CosmWasm-20 compliant token with blackl
 license = "Apache-2.0"
 repository = "https://fragwuerdig/cw20-taxed"
 
+[[bin]]
+name = "schema"
+path = "src/bin/schema.rs"
+required-features = ["schema-gen"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -14,6 +19,7 @@ crate-type = ["cdylib", "rlib"]
 backtraces = ["cosmwasm-std/backtraces"]
 # use library feature to disable all instantiate/execute/query exports
 library = []
+schema-gen = []
 
 [dependencies]
 cosmwasm-schema = { version = "1.1.0" }
