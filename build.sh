@@ -6,7 +6,7 @@ BLACKLIST=""
 
 rm -Rf artifacts
 mkdir artifacts
-cargo build --release --target wasm32-unknown-unknown
+RUSTFLAGS="-C target-feature=-bulk-memory" cargo build --release --target wasm32-unknown-unknown
 
 mv target/wasm32-unknown-unknown/release/*.wasm artifacts/
 rm -Rf target
