@@ -1,0 +1,26 @@
+{
+  "name": "cw20-taxes-deployer",
+  "version": "1.0.0",
+  "description": "deploy a cw20 taxed token",
+  "main": "deploy.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fragwuerdig/cw20-taxed.git"
+  },
+  "author": "Till Ziegler",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/fragwuerdig/cw20-taxed/issues"
+  },
+  "homepage": "https://github.com/fragwuerdig/cw20-taxed#readme",
+  "dependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.36.0",
+    "@cosmjs/stargate": "^0.36.0",
+    "dotenv": "^17.2.2",
+    "yargs": "^18.0.0"
+  }
+}
