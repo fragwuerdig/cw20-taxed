@@ -27,3 +27,6 @@ tarpaulin-report.*
 packages/*/schema
 contracts/*/schema
 schema
+
+.env
+node_modules
