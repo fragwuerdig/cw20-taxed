@@ -24,6 +24,12 @@ This is a list of on-chain deployments for this contract:
 | `v1.1.0+taxed003` | 9257 |
 | `v1.1.0+taxed004` | 10071 |
 
+## Testnet Deployments
+
+| Version  | Code ID |
+| -------- | ------- |
+| `v1.1.0+taxed004` | 1843 |
+
 ## Instructions to Migrate from Terraport/Terraswap Tokens
 
 Terraport and Terraswap offer token factories in order to create and manage tokens in a user-friendly manner. These are stock cw20 contracts. Some might want to migrate from these tokens to this contract. Please follow these instructions:
