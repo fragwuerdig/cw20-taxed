@@ -28,7 +28,7 @@ This is a list of on-chain deployments for this contract:
 
 | Version  | Code ID |
 | -------- | ------- |
-| `v1.1.0+taxed004` | 1843 |
+| `v1.1.0+taxed004` | 1846 |
 
 ## Instructions to Migrate from Terraport/Terraswap Tokens
 
